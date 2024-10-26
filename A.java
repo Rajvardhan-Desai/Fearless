@@ -1,0 +1,1 @@
+flutterfire configure --project=fearless-6dd9a

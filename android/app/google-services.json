@@ -1,0 +1,30 @@
+{
+  "project_info": {
+    "project_number": "25153739301",
+    "firebase_url": "https://fearless-6dd9a-default-rtdb.asia-southeast1.firebasedatabase.app",
+    "project_id": "fearless-6dd9a",
+    "storage_bucket": "fearless-6dd9a.appspot.com"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:25153739301:android:19211c89a5df3e1e0abdcc",
+        "android_client_info": {
+          "package_name": "com.fearless.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyC_bXecQ1tfvBgtkl-QMrDhUUoN2_yoR1g"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
