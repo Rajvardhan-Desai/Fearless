@@ -382,6 +382,10 @@ class HomeScreenState extends ConsumerState<HomeScreen> {
 
         return StatefulBuilder(
           builder: (context, setState) {
+            // Check if any contact is selected
+            final bool anyContactSelected =
+            contactSelection.values.any((isSelected) => isSelected);
+
             return Padding(
               padding: MediaQuery.of(context).viewInsets,
               child: SingleChildScrollView(
@@ -392,11 +396,11 @@ class HomeScreenState extends ConsumerState<HomeScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       // Icon and Title
-                      Row(
+                      const Row(
                         children: [
-                          const Icon(Icons.wifi_tethering,
+                          Icon(Icons.wifi_tethering,
                               color: Colors.red, size: 28),
-                          const SizedBox(width: 8),
+                          SizedBox(width: 8),
                           Expanded(
                             child: Text(
                               'Share status and real-time location?',
@@ -443,7 +447,7 @@ class HomeScreenState extends ConsumerState<HomeScreen> {
                           hintText: 'Reason for sharing (optional)',
                           counterText: '', // Hide counter text
                           contentPadding:
-                              const EdgeInsets.symmetric(horizontal: 12.0),
+                          const EdgeInsets.symmetric(horizontal: 12.0),
                           border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(8.0),
                           ),
@@ -521,10 +525,11 @@ class HomeScreenState extends ConsumerState<HomeScreen> {
                             child: const Text('Cancel'),
                           ),
                           ElevatedButton(
-                            onPressed: () {
+                            onPressed: anyContactSelected
+                                ? () {
                               // Handle share action
                               final selectedContacts =
-                                  emergencyContacts.where((contact) {
+                              emergencyContacts.where((contact) {
                                 final phone = contact['phone']!;
                                 return contactSelection[phone] ?? false;
                               }).toList();
@@ -533,11 +538,15 @@ class HomeScreenState extends ConsumerState<HomeScreen> {
                               // For example, send status and location to these contacts
 
                               Navigator.of(context).pop(); // Close modal
-                            },
+                            }
+                                : null, // Disable button if no contact is selected
                             style: ElevatedButton.styleFrom(
                               backgroundColor: const Color(0xff6f5172),
                             ),
-                            child: const Text('Share'),
+                            child: const Text(
+                              'Share',
+                              style: TextStyle(color: Colors.white),
+                            ),
                           ),
                         ],
                       ),
