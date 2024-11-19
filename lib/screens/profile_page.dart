@@ -5,6 +5,7 @@ import '../Widgets/snack_bar.dart';
 import '../widgets/user_avatar.dart';
 import 'change_password_screen.dart';
 import 'edit_profile_screen.dart';
+import 'emergency_contacts_screen.dart';
 
 class ProfilePage extends StatefulWidget {
   final String userName;
@@ -91,6 +92,17 @@ class ProfilePageState extends State<ProfilePage> {
           icon: Icons.edit_outlined,
           text: 'Edit Profile',
           onTap: () => _navigateToEditProfile(context),
+        ),
+        ProfileOption(
+          icon: Icons.contact_emergency_outlined,
+          text: 'Emergency Contacts',
+          onTap: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                  builder: (context) =>  const EmergencyContactsPage()),
+            );
+          },
         ),
         ProfileOption(
           icon: Icons.password_outlined,
