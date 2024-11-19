@@ -8,6 +8,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:shimmer/shimmer.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../providers/user_provider.dart';
+import '../widgets/emergency_sharing_widget.dart';
 import 'news_screen.dart';
 
 class HomeScreen extends ConsumerStatefulWidget {
@@ -21,7 +22,6 @@ class HomeScreen extends ConsumerStatefulWidget {
 
 class HomeScreenState extends ConsumerState<HomeScreen> {
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey();
-  final TextEditingController _reasonController = TextEditingController();
   late int _selectedIndex;
   final _auth = FirebaseAuth.instance;
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -357,8 +357,36 @@ class HomeScreenState extends ConsumerState<HomeScreen> {
     }
   }
 
+  // Add below emergency contact list
+  final List<Map<String, dynamic>> toggleOptions = [
+    {
+      'title': 'Phone call',
+      'description': 'When you start and end a call',
+      'value': true,
+      'disabled': false, // Enabled
+    },
+    {
+      'title': 'Emergency call',
+      'description': 'When you start and end an emergency call',
+      'value': true,
+      'disabled': false, // Enabled
+    },
+    {
+      'title': 'Low battery',
+      'description': 'When your battery is below 15%',
+      'value': false,
+      'disabled': false, // Enabled
+    },
+    {
+      'title': 'Real-time location',
+      'description':
+          'Required for Emergency Sharing. Uses Location Sharing in Google Maps.',
+      'value': true,
+      'disabled': true, // Always disabled
+    },
+  ];
+
   Future<void> _showEmergencySharingBottomSheet() async {
-    // Fetch emergency contacts from Firestore
     final emergencyContacts = await _fetchEmergencyContacts();
 
     if (emergencyContacts.isEmpty) {
@@ -374,187 +402,12 @@ class HomeScreenState extends ConsumerState<HomeScreen> {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(16.0)),
       ),
-      builder: (BuildContext context) {
-        // Initialize selection state
-        final Map<String, bool> contactSelection = {
-          for (var contact in emergencyContacts) contact['phone']!: true,
-        };
-
-        return StatefulBuilder(
-          builder: (context, setState) {
-            // Check if any contact is selected
-            final bool anyContactSelected =
-            contactSelection.values.any((isSelected) => isSelected);
-
-            return Padding(
-              padding: MediaQuery.of(context).viewInsets,
-              child: SingleChildScrollView(
-                child: Padding(
-                  padding: const EdgeInsets.all(16.0),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      // Icon and Title
-                      const Row(
-                        children: [
-                          Icon(Icons.wifi_tethering,
-                              color: Colors.red, size: 28),
-                          SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              'Share status and real-time location?',
-                              style: TextStyle(
-                                fontWeight: FontWeight.bold,
-                                fontSize: 18.0,
-                                color: Colors.black87,
-                              ),
-                              softWrap: true,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 16),
-
-                      // Description Text
-                      const Text(
-                        'Status updates and location will be shared with emergency contacts for 24 hours or until you stop sharing.',
-                        style: TextStyle(fontSize: 14.0, color: Colors.black54),
-                      ),
-                      const SizedBox(height: 8),
-
-                      // Link to change settings
-                      GestureDetector(
-                        onTap: () {
-                          // Navigate to settings
-                        },
-                        child: const Text(
-                          'Change settings',
-                          style: TextStyle(
-                            color: Colors.blue,
-                            fontSize: 14.0,
-                            decoration: TextDecoration.underline,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-
-                      // Optional Reason Input
-                      TextField(
-                        controller: _reasonController,
-                        maxLength: 40,
-                        decoration: InputDecoration(
-                          hintText: 'Reason for sharing (optional)',
-                          counterText: '', // Hide counter text
-                          contentPadding:
-                          const EdgeInsets.symmetric(horizontal: 12.0),
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(8.0),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-
-                      // Share with List
-                      const Text(
-                        'Share with',
-                        style: TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 14.0,
-                          color: Colors.black87,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-
-                      // Dynamic Contact List
-                      ...emergencyContacts.map((contact) {
-                        final phone = contact['phone']!;
-                        return Row(
-                          children: [
-                            CircleAvatar(
-                              radius: 20,
-                              backgroundColor: Colors.pink,
-                              child: Text(
-                                contact['name']!.substring(0, 1).toUpperCase(),
-                                style: const TextStyle(color: Colors.white),
-                              ),
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    contact['name']!,
-                                    style: const TextStyle(
-                                      fontSize: 14.0,
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                  ),
-                                  Text(
-                                    phone,
-                                    style: const TextStyle(
-                                      fontSize: 12.0,
-                                      color: Colors.black54,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            Checkbox(
-                              value: contactSelection[phone],
-                              onChanged: (value) {
-                                setState(() {
-                                  contactSelection[phone] = value ?? false;
-                                });
-                              },
-                            ),
-                          ],
-                        );
-                      }).toList(),
-                      const SizedBox(height: 16),
-
-                      // Buttons
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          TextButton(
-                            onPressed: () {
-                              Navigator.of(context).pop(); // Close modal
-                            },
-                            child: const Text('Cancel'),
-                          ),
-                          ElevatedButton(
-                            onPressed: anyContactSelected
-                                ? () {
-                              // Handle share action
-                              final selectedContacts =
-                              emergencyContacts.where((contact) {
-                                final phone = contact['phone']!;
-                                return contactSelection[phone] ?? false;
-                              }).toList();
-
-                              // Use selectedContacts as needed
-                              // For example, send status and location to these contacts
-
-                              Navigator.of(context).pop(); // Close modal
-                            }
-                                : null, // Disable button if no contact is selected
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color(0xff6f5172),
-                            ),
-                            child: const Text(
-                              'Share',
-                              style: TextStyle(color: Colors.white),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            );
+      builder: (context) {
+        return EmergencySharingWidget(
+          emergencyContacts: emergencyContacts,
+          onShare: (contactSelection) {
+            // Handle sharing logic
+            debugPrint("Sharing with: $contactSelection");
           },
         );
       },
@@ -596,7 +449,6 @@ class HomeScreenState extends ConsumerState<HomeScreen> {
                   fontSize: 15.0,
                   fontWeight: FontWeight.bold,
                 ),
-                // Adds "..." for long text
                 softWrap: true, // Allows text wrapping if needed
               ),
             ),
