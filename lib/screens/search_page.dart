@@ -144,7 +144,7 @@ class SearchPageState extends ConsumerState<SearchPage> {
   }
 
   Future<BitmapDescriptor> _createCustomMarker(String assetPath) async {
-    final ImageConfiguration configuration = ImageConfiguration();
+    const ImageConfiguration configuration = ImageConfiguration();
     return await BitmapDescriptor.fromAssetImage(configuration, assetPath);
   }
 
@@ -430,7 +430,7 @@ class SearchPageState extends ConsumerState<SearchPage> {
                 filled: true,
                 fillColor: Colors.white,
                 contentPadding: const EdgeInsets.symmetric(horizontal: 16),
-                prefixIcon: isSource ? Icon(Icons.location_on) : Icon(Icons.flag),
+                prefixIcon: isSource ? const Icon(Icons.location_on) : const Icon(Icons.flag),
               ),
             );
           },
