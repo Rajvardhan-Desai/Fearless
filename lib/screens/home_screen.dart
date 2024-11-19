@@ -8,7 +8,6 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:shimmer/shimmer.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../providers/user_provider.dart';
-import '../widgets/emergency_sharing_widget.dart';
 import 'news_screen.dart';
 
 class HomeScreen extends ConsumerStatefulWidget {
@@ -22,6 +21,7 @@ class HomeScreen extends ConsumerStatefulWidget {
 
 class HomeScreenState extends ConsumerState<HomeScreen> {
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey();
+  final TextEditingController _reasonController = TextEditingController();
   late int _selectedIndex;
   final _auth = FirebaseAuth.instance;
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -386,6 +386,51 @@ class HomeScreenState extends ConsumerState<HomeScreen> {
     },
   ];
 
+  Widget _buildToggleOptions(
+      BuildContext context, void Function(void Function()) setState) {
+    return Column(
+      children: toggleOptions.map((option) {
+        // Extract fields and ensure correct types
+        final String title = option['title'] as String;
+        final String description = option['description'] as String;
+        final bool value = option['value'] as bool;
+        final bool isDisabled = option['disabled'] as bool;
+
+        return SwitchListTile(
+          title: Text(
+            title,
+            style: TextStyle(
+              fontWeight: FontWeight.bold,
+              color: isDisabled
+                  ? Colors.grey
+                  : Colors.black, // Disabled items appear grey
+            ),
+          ),
+          subtitle: Text(
+            description,
+            style: TextStyle(
+              color: isDisabled
+                  ? Colors.grey
+                  : Colors.black54, // Disabled subtitle text
+            ),
+          ),
+          value: value,
+          onChanged: isDisabled
+              ? null // Prevent toggling if disabled
+              : (bool newValue) {
+                  setState(() {
+                    option['value'] = newValue;
+                  });
+                },
+          activeColor: isDisabled
+              ? Colors.grey
+              : Colors.deepPurple, // Adjust toggle color
+        );
+      }).toList(),
+    );
+  }
+
+// Modify the _showEmergencySharingBottomSheet method
   Future<void> _showEmergencySharingBottomSheet() async {
     final emergencyContacts = await _fetchEmergencyContacts();
 
@@ -402,12 +447,162 @@ class HomeScreenState extends ConsumerState<HomeScreen> {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(16.0)),
       ),
-      builder: (context) {
-        return EmergencySharingWidget(
-          emergencyContacts: emergencyContacts,
-          onShare: (contactSelection) {
-            // Handle sharing logic
-            debugPrint("Sharing with: $contactSelection");
+      builder: (BuildContext context) {
+        final Map<String, bool> contactSelection = {
+          for (var contact in emergencyContacts) contact['phone']!: true,
+        };
+
+        return StatefulBuilder(
+          builder: (context, setState) {
+            final bool anyContactSelected =
+                contactSelection.values.any((isSelected) => isSelected);
+
+            return Padding(
+              padding: MediaQuery.of(context).viewInsets,
+              child: SingleChildScrollView(
+                child: Padding(
+                  padding: const EdgeInsets.all(16.0),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Row(
+                        children: [
+                          Icon(Icons.wifi_tethering,
+                              color: Colors.red, size: 28),
+                          SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'Share status and real-time location?',
+                              style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 18.0,
+                                color: Colors.black87,
+                              ),
+                              softWrap: true,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 16),
+                      const Text(
+                        'Status updates and location will be shared with emergency contacts for 24 hours or until you stop sharing.',
+                        style: TextStyle(fontSize: 14.0, color: Colors.black54),
+                      ),
+
+                      const SizedBox(height: 16),
+                      TextField(
+                        controller: _reasonController,
+                        maxLength: 40,
+                        decoration: InputDecoration(
+                          hintText: 'Reason for sharing (optional)',
+                          counterText: '',
+                          contentPadding:
+                              const EdgeInsets.symmetric(horizontal: 12.0),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8.0),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      const Text(
+                        'Share with',
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 14.0,
+                          color: Colors.black87,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      ...emergencyContacts.map((contact) {
+                        final phone = contact['phone']!;
+                        return Row(
+                          children: [
+                            CircleAvatar(
+                              radius: 20,
+                              backgroundColor: Colors.pink,
+                              child: Text(
+                                contact['name']!.substring(0, 1).toUpperCase(),
+                                style: const TextStyle(color: Colors.white),
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    contact['name']!,
+                                    style: const TextStyle(
+                                      fontSize: 14.0,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                  Text(
+                                    phone,
+                                    style: const TextStyle(
+                                      fontSize: 12.0,
+                                      color: Colors.black54,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            Checkbox(
+                              value: contactSelection[phone],
+                              onChanged: (value) {
+                                setState(() {
+                                  contactSelection[phone] = value ?? false;
+                                });
+                              },
+                            ),
+                          ],
+                        );
+                      }).toList(),
+                      const SizedBox(height: 16),
+
+                      // Add the toggle options below emergency contacts
+                      const Text(
+                        'Emergency Sharing Options',
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 14.0,
+                          color: Colors.black87,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      _buildToggleOptions(context, setState),
+
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          TextButton(
+                            onPressed: () {
+                              Navigator.of(context).pop();
+                            },
+                            child: const Text('Cancel'),
+                          ),
+                          ElevatedButton(
+                            onPressed: anyContactSelected
+                                ? () {
+                                    Navigator.of(context).pop();
+                                  }
+                                : null,
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: const Color(0xff6f5172),
+                            ),
+                            child: const Text(
+                              'Share',
+                              style: TextStyle(color: Colors.white),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
           },
         );
       },
