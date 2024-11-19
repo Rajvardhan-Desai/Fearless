@@ -4,8 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shimmer/shimmer.dart';
-import 'package:firebase_storage/firebase_storage.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../providers/user_provider.dart';
 import 'news_screen.dart';
 
@@ -22,7 +21,6 @@ class HomeScreenState extends ConsumerState<HomeScreen> {
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey();
 
   late int _selectedIndex;
-  List<String>? _cachedImageUrls;
 
   bool _isLoading = true;
 
@@ -37,13 +35,6 @@ class HomeScreenState extends ConsumerState<HomeScreen> {
       try {
         await userNotifier.fetchUserData();
 
-        _cachedImageUrls = await _getCachedSlideshowImages();
-        if (_cachedImageUrls == null || _cachedImageUrls!.isEmpty) {
-          final imageUrls = await _fetchSlideshowImages();
-          await _cacheSlideshowImages(imageUrls);
-          _cachedImageUrls = imageUrls;
-        }
-
         setState(() {
           _isLoading = false;
         });
@@ -53,31 +44,6 @@ class HomeScreenState extends ConsumerState<HomeScreen> {
     });
   }
 
-  Future<void> _cacheSlideshowImages(List<String> imageUrls) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setStringList('gallery_images', imageUrls);
-  }
-
-  Future<List<String>?> _getCachedSlideshowImages() async {
-    final prefs = await SharedPreferences.getInstance();
-    return prefs.getStringList('gallery_images');
-  }
-
-  Future<List<String>> _fetchSlideshowImages() async {
-    final storageRef = FirebaseStorage.instance.ref('Gallery');
-    final ListResult result = await storageRef.listAll();
-    List<String> allImages = [];
-
-    for (var prefix in result.prefixes) {
-      final ListResult subFolderResult = await prefix.listAll();
-      final List<String> urls = await Future.wait(
-        subFolderResult.items.map((ref) => ref.getDownloadURL()).toList(),
-      );
-      allImages.addAll(urls);
-    }
-
-    return allImages;
-  }
 
   void _showErrorSnackBar(String message) {
     ScaffoldMessenger.of(context).showSnackBar(
@@ -229,18 +195,184 @@ class HomeScreenState extends ConsumerState<HomeScreen> {
 
   Widget _buildHomeContent(UserState userState) {
     return SingleChildScrollView(
-      padding: const EdgeInsets.all(16.0),
+      padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 20.0),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            'Welcome, ${userState.name}!',
-            style: const TextStyle(
-              fontSize: 24.0,
+          const Text(
+            'Get help fast',
+            style: TextStyle(
+              fontSize: 20.0,
               fontWeight: FontWeight.bold,
             ),
           ),
+          const SizedBox(height: 16),
+          _buildQuickAccess(),
+          const SizedBox(height: 32),
+          const Text(
+            'Be prepared',
+            style: TextStyle(
+              fontSize: 18.0,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 12),
+          _buildPreparednessTile(),
         ],
+      ),
+    );
+  }
+
+  // Call Emergency Number
+  Future<void> _callEmergencyNumber() async {
+    const emergencyNumber = '112';
+    final Uri url = Uri(scheme: 'tel', path: emergencyNumber);
+
+    if (await canLaunchUrl(url)) {
+      await launchUrl(url);
+    } else {
+      _showErrorSnackBar('Unable to launch dialer.');
+    }
+  }
+
+
+// Emergency tools UI
+  Widget _buildQuickAccess() {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Expanded(
+          child: _buildActionButton(
+            icon: Icons.wifi_tethering,
+            title: 'Emergency Sharing',
+            onTap: () {
+              // Handle navigation
+            },
+          ),
+        ),
+        const SizedBox(width: 12), // Spacing between buttons
+        Expanded(
+          child: _buildActionButton(
+            icon: Icons.phone,
+            title: 'Call 112',
+            onTap: _showCallConfirmationDialog, // Show the confirmation dialog
+          ),
+        ),
+      ],
+    );
+  }
+
+  // Show Confirmation Dialog
+  Future<void> _showCallConfirmationDialog() async {
+    return showDialog<void>(
+      context: context,
+      barrierDismissible: true,
+      builder: (BuildContext context) {
+        return Dialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12.0),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(16.0),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.phone, size: 48, color: Colors.redAccent),
+                const SizedBox(height: 16),
+                const Text(
+                  'Call 112?',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  'Are you sure you want to call emergency services?',
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 16),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceAround,
+                  children: [
+                    TextButton(
+                      onPressed: () {
+                        Navigator.of(context).pop();
+                      },
+                      child: const Text('Cancel'),
+                    ),
+                    ElevatedButton(
+                      onPressed: () {
+                        Navigator.of(context).pop();
+                        _callEmergencyNumber();
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.redAccent,
+                      ),
+                      child: const Text('Call 112'),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+
+// Preparedness UI
+  Widget _buildPreparednessTile() {
+    return _buildActionButton(
+      icon: Icons.security,
+      title: 'Safety Check',
+      onTap: () {
+        // Handle navigation
+      },
+    );
+  }
+
+
+
+// Reusable UI for each feature tile
+  Widget _buildActionButton({
+    required IconData icon,
+    required String title,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        height: 90.0, // Fixed height for uniformity
+        margin: const EdgeInsets.symmetric(horizontal: 1.0), // Equal margins
+        padding: const EdgeInsets.symmetric(horizontal: 12.0), // Inner padding
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(30.0),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.grey.withOpacity(0.1),
+              blurRadius: 8.0,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: Row(
+          children: [
+            Icon(icon, color: Colors.redAccent),
+            const SizedBox(width: 8),
+            Expanded( // Wraps the text dynamically
+              child: Text(
+                title,
+                style: const TextStyle(
+                  fontSize: 15.0,
+                  fontWeight: FontWeight.bold,
+                ),
+                 // Adds "..." for long text
+                softWrap: true, // Allows text wrapping if needed
+              ),
+            ),
+            const Icon(Icons.chevron_right, color: Colors.grey),
+          ],
+        ),
       ),
     );
   }
