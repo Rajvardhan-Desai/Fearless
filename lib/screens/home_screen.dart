@@ -316,7 +316,7 @@ class HomeScreenState extends ConsumerState<HomeScreen> {
                         backgroundColor: Colors.redAccent,
                       ),
                       child: const Text('Call 112',
-                          style: TextStyle(color: Colors.black)),
+                          style: TextStyle(color: Colors.white,fontWeight: FontWeight.bold)),
                     ),
                   ],
                 ),
@@ -496,7 +496,7 @@ class HomeScreenState extends ConsumerState<HomeScreen> {
                       ),
                       const SizedBox(height: 16),
                       const Text(
-                        'Status updates and location will be shared with emergency contacts for 24 hours or until you stop sharing.',
+                        'Status updates and location will be shared with emergency contacts.',
                         style: TextStyle(fontSize: 14.0, color: Colors.black54),
                       ),
 
@@ -573,7 +573,7 @@ class HomeScreenState extends ConsumerState<HomeScreen> {
 
                       // Add the toggle options below emergency contacts
                       const Text(
-                        'Emergency Sharing Options',
+                        'Share this info in an emergency',
                         style: TextStyle(
                           fontWeight: FontWeight.bold,
                           fontSize: 14.0,
@@ -590,7 +590,7 @@ class HomeScreenState extends ConsumerState<HomeScreen> {
                             onPressed: () {
                               Navigator.of(context).pop();
                             },
-                            child: const Text('Cancel'),
+                            child: const Text('Cancel',style: TextStyle(fontSize: 19),),
                           ),
                           ElevatedButton(
                             onPressed: anyContactSelected
@@ -614,6 +614,7 @@ class HomeScreenState extends ConsumerState<HomeScreen> {
                                 };
                               }).toList();
 
+
                               // Navigate to EmergencySharingScreen immediately
                               Navigator.of(context).push(
                                 MaterialPageRoute(
@@ -629,14 +630,16 @@ class HomeScreenState extends ConsumerState<HomeScreen> {
                                 message: emergencyMessage,
                                 contacts: selectedContacts.map((e) => e['phone']!).toList(),
                               );
+
                             }
                                 : null,
                             style: ElevatedButton.styleFrom(
+                              minimumSize: const Size(140, 60),
                               backgroundColor: const Color(0xff6f5172),
                             ),
                             child: const Text(
                               'Share',
-                              style: TextStyle(color: Colors.white),
+                              style: TextStyle(color: Colors.white,fontSize: 19),
                             ),
                           ),
 
