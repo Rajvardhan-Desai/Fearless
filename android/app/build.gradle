@@ -1,10 +1,7 @@
 plugins {
     id "com.android.application"
-    // START: FlutterFire Configuration
-    id 'com.google.gms.google-services'
-    // END: FlutterFire Configuration
+    id 'com.google.gms.google-services' // Firebase services
     id "kotlin-android"
-    // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id "dev.flutter.flutter-gradle-plugin"
 }
 
@@ -15,13 +12,12 @@ if (localPropertiesFile.exists()) {
         localProperties.load(reader)
     }
 }
-def MAPS_API_KEY = localProperties.getProperty('MAPS_API_KEY')
+def MAPS_API_KEY = localProperties.getProperty('MAPS_API_KEY') ?: "default_api_key"
 
 android {
-    namespace = "com.fearless.app"
+    namespace "com.fearless.app" // Ensure namespace is correct
     compileSdk = 34
     ndkVersion = "25.1.8937393"
-
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -40,15 +36,16 @@ android {
         applicationId = "com.fearless.app"
         minSdk = 23
         targetSdk = 34
-        versionCode = flutter.versionCode
+        versionCode = flutter.versionCode // Define in local.properties if undefined
         versionName = flutter.versionName
         multiDexEnabled true
-        resValue "string", "google_maps_api_key", MAPS_API_KEY
+        resValue "string", "google_maps_api_key", MAPS_API_KEY // API key
     }
 
     buildTypes {
         release {
             signingConfig = signingConfigs.debug
+            // Add proguard rules if necessary
         }
     }
 }
@@ -59,4 +56,5 @@ flutter {
 
 dependencies {
     implementation 'androidx.multidex:multidex:2.0.1'
+
 }
