@@ -32,7 +32,7 @@ class EmergencyContactsPage extends StatefulWidget {
 }
 
 class EmergencyContactsPageState extends State<EmergencyContactsPage> {
-  static const platform = MethodChannel('com.example.contacts/choose');
+  static const platform = MethodChannel('com.fearless.app/choose');
 
   // Updated the list to have a consistent type
   List<Map<String, String>> _emergencyContacts = [];
