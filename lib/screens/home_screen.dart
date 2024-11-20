@@ -32,7 +32,7 @@ class HomeScreenState extends ConsumerState<HomeScreen> {
   bool _isLoading = true;
 
   final TwilioFlutter twilioFlutter = TwilioFlutter(
-    accountSid : dotenv.env['TWILIO_ACCOUNT_SID']!,
+    accountSid: dotenv.env['TWILIO_ACCOUNT_SID']!,
     authToken: dotenv.env['TWILIO_AUTH_TOKEN']!,
     twilioNumber: dotenv.env['TWILIO_NO']!,
   );
@@ -316,7 +316,9 @@ class HomeScreenState extends ConsumerState<HomeScreen> {
                         backgroundColor: Colors.redAccent,
                       ),
                       child: const Text('Call 112',
-                          style: TextStyle(color: Colors.white,fontWeight: FontWeight.bold)),
+                          style: TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold)),
                     ),
                   ],
                 ),
@@ -390,7 +392,7 @@ class HomeScreenState extends ConsumerState<HomeScreen> {
     {
       'title': 'Real-time location',
       'description':
-      'Required for Emergency Sharing. Uses Location Sharing in Google Maps.',
+          'Required for Emergency Sharing. Uses Location Sharing in Google Maps.',
       'value': true,
       'disabled': true, // Always disabled
     },
@@ -428,10 +430,10 @@ class HomeScreenState extends ConsumerState<HomeScreen> {
           onChanged: isDisabled
               ? null // Prevent toggling if disabled
               : (bool newValue) {
-            setState(() {
-              option['value'] = newValue;
-            });
-          },
+                  setState(() {
+                    option['value'] = newValue;
+                  });
+                },
           activeColor: isDisabled
               ? Colors.grey
               : Colors.deepPurple, // Adjust toggle color
@@ -442,6 +444,7 @@ class HomeScreenState extends ConsumerState<HomeScreen> {
 
 // Modify the _showEmergencySharingBottomSheet method
   Future<void> _showEmergencySharingBottomSheet() async {
+    final userState = ref.watch(userProvider);
     final emergencyContacts = await _fetchEmergencyContacts();
 
     if (emergencyContacts.isEmpty) {
@@ -465,7 +468,7 @@ class HomeScreenState extends ConsumerState<HomeScreen> {
         return StatefulBuilder(
           builder: (context, setState) {
             final bool anyContactSelected =
-            contactSelection.values.any((isSelected) => isSelected);
+                contactSelection.values.any((isSelected) => isSelected);
 
             return Padding(
               padding: MediaQuery.of(context).viewInsets,
@@ -476,6 +479,7 @@ class HomeScreenState extends ConsumerState<HomeScreen> {
                     mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
+                      // Emergency Sharing Header
                       const Row(
                         children: [
                           Icon(Icons.wifi_tethering,
@@ -495,12 +499,8 @@ class HomeScreenState extends ConsumerState<HomeScreen> {
                         ],
                       ),
                       const SizedBox(height: 16),
-                      const Text(
-                        'Status updates and location will be shared with emergency contacts.',
-                        style: TextStyle(fontSize: 14.0, color: Colors.black54),
-                      ),
 
-                      const SizedBox(height: 16),
+                      // Text Field for Reason
                       TextField(
                         controller: _reasonController,
                         maxLength: 40,
@@ -508,13 +508,15 @@ class HomeScreenState extends ConsumerState<HomeScreen> {
                           hintText: 'Reason for sharing (optional)',
                           counterText: '',
                           contentPadding:
-                          const EdgeInsets.symmetric(horizontal: 12.0),
+                              const EdgeInsets.symmetric(horizontal: 12.0),
                           border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(8.0),
                           ),
                         ),
                       ),
                       const SizedBox(height: 16),
+
+                      // Share with Contacts
                       const Text(
                         'Share with',
                         style: TextStyle(
@@ -571,7 +573,7 @@ class HomeScreenState extends ConsumerState<HomeScreen> {
                       }).toList(),
                       const SizedBox(height: 16),
 
-                      // Add the toggle options below emergency contacts
+                      // Toggle Options
                       const Text(
                         'Share this info in an emergency',
                         style: TextStyle(
@@ -583,6 +585,7 @@ class HomeScreenState extends ConsumerState<HomeScreen> {
                       const SizedBox(height: 8),
                       _buildToggleOptions(context, setState),
 
+                      // Action Buttons
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
@@ -590,48 +593,51 @@ class HomeScreenState extends ConsumerState<HomeScreen> {
                             onPressed: () {
                               Navigator.of(context).pop();
                             },
-                            child: const Text('Cancel',style: TextStyle(fontSize: 19),),
+                            child: const Text('Cancel',
+                                style: TextStyle(fontSize: 19)),
                           ),
                           ElevatedButton(
                             onPressed: anyContactSelected
-                                ? () async {
-                              final String reason = _reasonController.text.trim();
+                                ? () {
+                                    final String reason =
+                                        _reasonController.text.trim();
 
-                              // Prepare message
-                              String emergencyMessage =
-                                  "Emergency! Please help. Reason: ${reason.isNotEmpty ? reason : 'N/A'}.";
+                                    // Filter selected contacts
+                                    final List<Map<String, String>>
+                                        selectedContacts = contactSelection
+                                            .entries
+                                            .where((entry) => entry.value)
+                                            .map((entry) {
+                                      final contact =
+                                          emergencyContacts.firstWhere(
+                                              (c) => c['phone'] == entry.key);
+                                      return {
+                                        'name': contact['name']!,
+                                        'phone': contact['phone']!,
+                                      };
+                                    }).toList();
 
-                              // Filter selected contacts
-                              final List<Map<String, String>> selectedContacts =
-                              contactSelection.entries
-                                  .where((entry) => entry.value)
-                                  .map((entry) {
-                                final contact = emergencyContacts.firstWhere(
-                                        (c) => c['phone'] == entry.key);
-                                return {
-                                  'name': contact['name']!,
-                                  'phone': contact['phone']!,
-                                };
-                              }).toList();
+                                    // Collect selected toggle options
+                                    final List selectedOptions = toggleOptions
+                                        .where(
+                                            (option) => option['value'] == true)
+                                        .map((option) => option['title'])
+                                        .toList();
 
 
-                              // Navigate to EmergencySharingScreen immediately
-                              Navigator.of(context).push(
-                                MaterialPageRoute(
-                                  builder: (context) => EmergencySharingScreen(
-                                    selectedContacts: selectedContacts,
-                                  ),
-                                ),
-                              );
 
-                              // Send SMS in the background
-                              sendEmergencySMSInBackground(
-                                context: context,
-                                message: emergencyMessage,
-                                contacts: selectedContacts.map((e) => e['phone']!).toList(),
-                              );
-
-                            }
+                                    // Navigate to EmergencySharingScreen
+                                    Navigator.of(context).push(
+                                      MaterialPageRoute(
+                                        builder: (context) =>
+                                            EmergencySharingScreen(
+                                          selectedContacts: selectedContacts,
+                                          selectedOptions: selectedOptions,
+                                          reason: reason,
+                                        ),
+                                      ),
+                                    );
+                                  }
                                 : null,
                             style: ElevatedButton.styleFrom(
                               minimumSize: const Size(140, 60),
@@ -639,10 +645,10 @@ class HomeScreenState extends ConsumerState<HomeScreen> {
                             ),
                             child: const Text(
                               'Share',
-                              style: TextStyle(color: Colors.white,fontSize: 19),
+                              style:
+                                  TextStyle(color: Colors.white, fontSize: 19),
                             ),
                           ),
-
                         ],
                       ),
                     ],
@@ -696,38 +702,49 @@ class HomeScreenState extends ConsumerState<HomeScreen> {
 
     // Get the current location
     return await Geolocator.getCurrentPosition(
-      desiredAccuracy: LocationAccuracy.high,
+      desiredAccuracy: LocationAccuracy.best,
     );
+
   }
 
   Future<void> sendEmergencySMSInBackground({
-    required BuildContext context,
     required String message,
     required List<String> contacts,
+    String? reason,
   }) async {
     final position = await _getCurrentLocation();
     if (position != null) {
-      final locationLink = generateGoogleMapsLink(position.latitude, position.longitude);
-      message += "\nMy location: $locationLink";
+      final locationLink =
+          generateGoogleMapsLink(position.latitude, position.longitude);
+      message += "\nLocation: $locationLink";
     } else {
       message += "\nUnable to fetch location.";
+    }
+
+    if (reason != null && reason.isNotEmpty) {
+      message += "\nReason: $reason";
     }
 
     // Run the SMS sending in the background
     Future.microtask(() async {
       try {
         for (String contact in contacts) {
-          final sanitizedContact = sanitizePhoneNumber(contact);
-          await twilioFlutter.sendSMS(
-            toNumber: sanitizedContact,
-            messageBody: message,
-          );
-          debugPrint("SMS sent to $sanitizedContact");
+          try {
+            final sanitizedContact = sanitizePhoneNumber(contact);
+            await twilioFlutter.sendSMS(
+              toNumber: sanitizedContact,
+              messageBody: message,
+            );
+            debugPrint("SMS sent to $sanitizedContact");
+          } catch (error) {
+            debugPrint("Failed to send SMS to $contact: $error");
+          }
         }
-
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Emergency SMS sent successfully!")),
-        );
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text("Emergency SMS sent successfully!")),
+          );
+        }
       } catch (error) {
         debugPrint("Failed to send SMS: $error");
         ScaffoldMessenger.of(context).showSnackBar(
@@ -736,11 +753,6 @@ class HomeScreenState extends ConsumerState<HomeScreen> {
       }
     });
   }
-
-
-
-
-
 
 // Reusable UI for each feature tile
   Widget _buildActionButton({

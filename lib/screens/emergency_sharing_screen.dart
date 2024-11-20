@@ -1,36 +1,103 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:permission_handler/permission_handler.dart';
+import 'package:twilio_flutter/twilio_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../providers/user_provider.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:battery_plus/battery_plus.dart';
+import 'package:sensors_plus/sensors_plus.dart';
+import 'dart:math';
 
-class EmergencySharingScreen extends StatefulWidget {
+import 'home_screen.dart';
+
+class EmergencySharingScreen extends ConsumerStatefulWidget {
   final List<Map<String, String>> selectedContacts; // Dynamic contact list
+  final List selectedOptions;
+  final String reason;
 
-  const EmergencySharingScreen({super.key, required this.selectedContacts});
+
+  const EmergencySharingScreen({
+    super.key,
+    required this.selectedContacts,
+    required this.selectedOptions,
+    required this.reason,
+  });
 
   @override
-  State<EmergencySharingScreen> createState() => _EmergencySharingScreenState();
+  EmergencySharingScreenState createState() => EmergencySharingScreenState();
 }
 
-class _EmergencySharingScreenState extends State<EmergencySharingScreen> {
+class EmergencySharingScreenState
+    extends ConsumerState<EmergencySharingScreen> {
   String? _liveLocationLink;
   bool _isSharing = true;
+  late final userState;
+  int chopCount = 0;
+  bool isChopDetecting = false;
+
+  StreamSubscription<Position>? positionStream;
+
+  final TwilioFlutter twilioFlutter = TwilioFlutter(
+    accountSid: dotenv.env['TWILIO_ACCOUNT_SID']!,
+    authToken: dotenv.env['TWILIO_AUTH_TOKEN']!,
+    twilioNumber: dotenv.env['TWILIO_NO']!,
+  );
 
   @override
   void initState() {
     super.initState();
     _startLiveLocationSharing();
+    monitorBatteryLevel(); // Start monitoring battery level
+
+
   }
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Initialize userState here safely
+    userState = ref.watch(userProvider);
+
+    sendEmergencySMSInBackground(
+      contacts: widget.selectedContacts
+          .map((c) => c['phone']!)
+          .toList(),
+      message:
+      "\nYou're receiving this message because you're an emergency contact for ${userState.name}.\nPlease call or text ${userState.name} directly for updates.",
+    );
+  }
+
 
   @override
   void dispose() {
     _stopLiveLocationSharing();
+    positionStream?.cancel(); // Cancel the stream if active
     super.dispose();
   }
 
   /// Generate Google Maps Live Location Link
   Future<void> _startLiveLocationSharing() async {
+    LocationPermission permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied) {
+      permission = await Geolocator.requestPermission();
+      if (permission == LocationPermission.denied) {
+        setState(() {
+          _liveLocationLink = 'Location permission denied.';
+        });
+        return;
+      }
+    }
+
+    if (permission == LocationPermission.deniedForever) {
+      setState(() {
+        _liveLocationLink = 'Location permissions are permanently denied.';
+      });
+      return;
+    }
+
     try {
       final Position position = await Geolocator.getCurrentPosition(
         desiredAccuracy: LocationAccuracy.high,
@@ -38,7 +105,7 @@ class _EmergencySharingScreenState extends State<EmergencySharingScreen> {
 
       setState(() {
         _liveLocationLink =
-        'https://www.google.com/maps?q=${position.latitude},${position.longitude}';
+            'https://www.google.com/maps?q=${position.latitude},${position.longitude}';
       });
     } catch (e) {
       setState(() {
@@ -49,33 +116,23 @@ class _EmergencySharingScreenState extends State<EmergencySharingScreen> {
 
   /// Stop Live Location Sharing
   void _stopLiveLocationSharing() {
-    setState(() {
-      _isSharing = false;
-    });
-    // Implement logic to stop sharing in your app (e.g., updating backend state).
+    if (mounted) {
+      setState(() {
+        _isSharing = false;
+      });
+    } else {
+      _isSharing = false; // Update the variable directly without setState
+    }
   }
 
   /// Initiate call to emergency contact
   Future<void> _makeCall(String number) async {
     final Uri phoneUri = Uri.parse('tel:$number');
-
-    // Check for CALL_PHONE permission
-    if (await Permission.phone.request().isGranted) {
-      // Directly call using CALL_PHONE intent
-      try {
-        await launchUrl(
-          phoneUri,
-          mode: LaunchMode.externalApplication, // Ensures the call is placed directly
-        );
-      } catch (e) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Unable to make a direct call')),
-        );
-      }
-    } else {
-      // Permission not granted
+    try {
+      await launchUrl(phoneUri);
+    } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Phone call permission is not granted')),
+        const SnackBar(content: Text('Unable to make a call')),
       );
     }
   }
@@ -173,79 +230,262 @@ class _EmergencySharingScreenState extends State<EmergencySharingScreen> {
   /// Show safety confirmation dialog
   Future<void> _showSafetyConfirmationDialog(BuildContext context) async {
     String? reason;
+    bool isDoneEnabled = false;
 
     await showDialog(
       context: context,
       builder: (context) {
-        return AlertDialog(
-          backgroundColor: const Color(0xFF121212), // Dark background
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-          ),
-          title: const Text(
-            'Confirm that you\'re safe',
-            style: TextStyle(color: Colors.white),
-          ),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Text(
-                'Tell your emergency contacts why you\'ve stopped sharing',
-                style: TextStyle(color: Colors.white70, fontSize: 14),
+        return StatefulBuilder(
+          builder: (context, setState) {
+            return AlertDialog(
+              backgroundColor: const Color(0xFF121212), // Dark background
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
               ),
-              const SizedBox(height: 12),
-              TextField(
-                maxLength: 40,
-                style: const TextStyle(color: Colors.white),
-                decoration: InputDecoration(
-                  hintText: 'Add a reason',
-                  hintStyle: const TextStyle(color: Colors.white38),
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide: const BorderSide(color: Colors.white38),
+              title: const Text(
+                'Confirm that you\'re safe',
+                style: TextStyle(color: Colors.white),
+              ),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text(
+                    'Tell your emergency contacts why you\'ve stopped sharing',
+                    style: TextStyle(color: Colors.white70, fontSize: 14),
                   ),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide: const BorderSide(color: Colors.white),
+                  const SizedBox(height: 12),
+                  TextField(
+                    maxLength: 40,
+                    style: const TextStyle(color: Colors.white),
+                    decoration: InputDecoration(
+                      hintText: 'Add a reason',
+                      hintStyle: const TextStyle(color: Colors.white38),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide: const BorderSide(color: Colors.white38),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide: const BorderSide(color: Colors.white),
+                      ),
+                      counterText: '',
+                    ),
+                    onChanged: (value) {
+                      reason = value;
+                      setState(() {
+                        isDoneEnabled = value.trim().isNotEmpty;
+                      });
+                    },
                   ),
-                  counterText: '',
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () {
+                    // Stop sharing and notify contacts without a reason
+                    sendEmergencySMSInBackground(
+                      message:
+                      '\n${userState.name} has stopped sharing their location.',
+                      contacts: widget.selectedContacts
+                          .map((c) => c['phone']!)
+                          .toList(),
+                    );
+
+                    // Navigate to home screen
+                    Navigator.pushAndRemoveUntil(
+                      context,
+                      MaterialPageRoute(builder: (context) => const HomeScreen()),
+                          (route) => false,
+                    );
+                  },
+                  child: const Text(
+                    'Skip',
+                    style: TextStyle(color: Colors.blueAccent),
+                  ),
                 ),
-                onChanged: (value) {
-                  reason = value;
-                },
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text(
-                'Skip',
-                style: TextStyle(color: Colors.blueAccent),
-              ),
-            ),
-            TextButton(
-              onPressed: () {
-                // Handle stopping sharing and notifying contacts
-                if (reason != null && reason!.isNotEmpty) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Reason sent: $reason')),
-                  );
-                }
-                Navigator.of(context).pop();
-              },
-              child: const Text(
-                'Done',
-                style: TextStyle(color: Colors.blueAccent),
-              ),
-            ),
-          ],
+                ElevatedButton(
+                  onPressed: isDoneEnabled
+                      ? () {
+                    // Stop sharing and notify contacts with a reason
+                    sendEmergencySMSInBackground(
+                      message:
+                      '\n${userState.name} has stopped sharing their location.',
+                      contacts: widget.selectedContacts
+                          .map((c) => c['phone']!)
+                          .toList(),
+                      reason: reason,
+                    );
+
+                    // Navigate to home screen
+                    Navigator.pushNamedAndRemoveUntil(
+                        context, '/home', (route) => false);
+                  }
+                      : null,
+                  child: const Text(
+                    'Done',
+                    style: TextStyle(color: Colors.blueAccent),
+                  ),
+                ),
+              ],
+            );
+          },
         );
       },
     );
   }
 
 
+  Future<Position?> _getCurrentLocation() async {
+    bool serviceEnabled;
+    LocationPermission permission;
+
+    // Check if location services are enabled
+    serviceEnabled = await Geolocator.isLocationServiceEnabled();
+    if (!serviceEnabled) {
+      // Location services are not enabled
+      return null;
+    }
+
+    // Check location permissions
+    permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied) {
+      permission = await Geolocator.requestPermission();
+      if (permission == LocationPermission.denied) {
+        // Permissions are denied
+        return null;
+      }
+    }
+
+    if (permission == LocationPermission.deniedForever) {
+      // Permissions are denied forever
+      return null;
+    }
+
+    // Get the current location
+    return await Geolocator.getCurrentPosition(
+      desiredAccuracy: LocationAccuracy.high,
+    );
+  }
+
+  String generateGoogleMapsLink(double latitude, double longitude) {
+    return 'https://www.google.com/maps?q=$latitude,$longitude';
+  }
+
+  String sanitizePhoneNumber(String phone) {
+    phone = phone.replaceAll(' ', ''); // Remove all spaces
+    if (!phone.startsWith('+91')) {
+      phone = '+91$phone'; // Add country code if not present
+    }
+    return phone;
+  }
+
+  Future<void> sendEmergencySMSInBackground({
+    required String message,
+    required List<String> contacts,
+    String? reason,
+  }) async {
+
+    final position = await _getCurrentLocation();
+    if (position != null) {
+      final locationLink =
+      generateGoogleMapsLink(position.latitude, position.longitude);
+      message += "\nLocation: $locationLink";
+    } else {
+      message += "\nUnable to fetch location.";
+    }
+
+    if (reason != null && reason.isNotEmpty) {
+      message += "\nReason: $reason";
+    }
+
+    // Run the SMS sending in the background
+    Future.microtask(() async {
+      try {
+        for (String contact in contacts) {
+          try {
+            final sanitizedContact = sanitizePhoneNumber(contact);
+            await twilioFlutter.sendSMS(
+              toNumber: sanitizedContact,
+              messageBody: message,
+            );
+            debugPrint("SMS sent to $sanitizedContact");
+          } catch (error) {
+            debugPrint("Failed to send SMS to $contact: $error");
+          }
+        }
+        // Check if the widget is still mounted before showing a SnackBar
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text("Emergency SMS sent successfully!")),
+          );
+        }
+      } catch (error) {
+        debugPrint("Failed to send SMS: $error");
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text("Failed to send SMS.")),
+          );
+        }
+      }
+    });
+  }
+
+
+  void handleActions(String actionType) async {
+    if (actionType == "phone_call" &&
+        widget.selectedOptions.contains("Phone call")) {
+      // Send SMS for phone call
+      String message =
+          '\nEmergency alert!\n${userState.name} is contacting you as an emergency contact.';
+      List<String> contacts =
+          widget.selectedContacts.map((c) => c['phone']!).toList();
+      sendEmergencySMSInBackground(
+          message: message, contacts: contacts, reason: widget.reason);
+    }
+
+    if (actionType == "emergency_call" &&
+        widget.selectedOptions.contains("Emergency call")) {
+      // Send SMS for emergency call
+      String message =
+          '\nEmergency alert!\n${userState.name} is calling emergency services.';
+      List<String> contacts =
+          widget.selectedContacts.map((c) => c['phone']!).toList();
+      sendEmergencySMSInBackground(
+          message: message, contacts: contacts, reason: widget.reason);
+
+      // Proceed to call emergency services
+      const emergencyNumber = '112';
+      launchUrl(Uri.parse('tel:$emergencyNumber'));
+    }
+
+    if (actionType == "low_battery" &&
+        widget.selectedOptions.contains("Low battery")) {
+      // Send SMS for low battery alert
+      String message =
+          "\nAlert: ${userState.name}'s phone battery is below 15%.";
+      List<String> contacts =
+          widget.selectedContacts.map((c) => c['phone']!).toList();
+      sendEmergencySMSInBackground(message: message, contacts: contacts);
+    }
+  }
+
+  Future<int> getBatteryLevel() async {
+    final battery = Battery();
+    return await battery.batteryLevel;
+  }
+
+  void monitorBatteryLevel() {
+    final battery = Battery();
+    battery.onBatteryStateChanged.listen((BatteryState state) async {
+      if (!mounted) return; // Exit if the widget is unmounted
+      if (state == BatteryState.discharging) {
+        int batteryLevel = await battery.batteryLevel;
+        if (batteryLevel <= 15) {
+          handleActions("low_battery");
+        }
+      }
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -283,10 +523,12 @@ class _EmergencySharingScreenState extends State<EmergencySharingScreen> {
                 onTap: () {
                   final number = contact['phone'];
                   if (number != null && number.isNotEmpty) {
+                    handleActions("phone_call");
                     _makeCall(number);
                   } else {
                     ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Phone number is missing or invalid')),
+                      const SnackBar(
+                          content: Text('Phone number is missing or invalid')),
                     );
                   }
                 },
@@ -296,7 +538,8 @@ class _EmergencySharingScreenState extends State<EmergencySharingScreen> {
                     children: [
                       CircleAvatar(
                         radius: 20,
-                        backgroundColor: const Color(0xFFFF80AB), // Pink avatar color
+                        backgroundColor:
+                            const Color(0xFFFF80AB), // Pink avatar color
                         child: Text(
                           contact['name']!.substring(0, 1).toUpperCase(),
                           style: const TextStyle(
@@ -343,22 +586,24 @@ class _EmergencySharingScreenState extends State<EmergencySharingScreen> {
             const SizedBox(height: 20),
             Row(
               children: [
-
-                const Icon(Icons.share_location_sharp, color: Colors.white,size: 30,),
+                const Icon(
+                  Icons.share_location_sharp,
+                  color: Colors.white,
+                  size: 30,
+                ),
                 const SizedBox(width: 20),
                 const Text(
                   'Real-time location',
                   style: TextStyle(color: Colors.white, fontSize: 18),
                 ),
-
                 const Spacer(),
                 IconButton(
                   icon: const Icon(Icons.open_in_new, color: Colors.blueAccent),
                   onPressed: _liveLocationLink != null
                       ? () {
-                    // Open Google Maps link
-                    launchUrl(Uri.parse(_liveLocationLink!));
-                  }
+                          // Open Google Maps link
+                          launchUrl(Uri.parse(_liveLocationLink!));
+                        }
                       : null,
                 ),
               ],
@@ -383,14 +628,17 @@ class _EmergencySharingScreenState extends State<EmergencySharingScreen> {
                 // Stop Button
                 ElevatedButton(
                   onPressed: () {
-                    _showStopSharingDialog(context); // Pass the context explicitly
+                    _showStopSharingDialog(
+                        context); // Pass the context explicitly
                   },
                   style: ElevatedButton.styleFrom(
                     backgroundColor: const Color(0xFFFF2D3A), // Red color
                     shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(30), // Rounded corners
+                      borderRadius:
+                          BorderRadius.circular(30), // Rounded corners
                     ),
-                    minimumSize: const Size(150, 60), // Size for consistent button look
+                    minimumSize:
+                        const Size(150, 60), // Size for consistent button look
                     elevation: 2, // Slight elevation for the button
                   ),
                   child: const Row(
@@ -413,13 +661,15 @@ class _EmergencySharingScreenState extends State<EmergencySharingScreen> {
                 OutlinedButton(
                   onPressed: () {
                     // Call emergency number
+                    handleActions("emergency_call");
                     const emergencyNumber = 'tel:112';
                     launchUrl(Uri.parse(emergencyNumber));
                   },
                   style: OutlinedButton.styleFrom(
                     side: const BorderSide(color: Colors.white), // White border
                     shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(50), // Rounded corners
+                      borderRadius:
+                          BorderRadius.circular(50), // Rounded corners
                     ),
                     minimumSize: const Size(150, 60), // Consistent button size
                     foregroundColor: Colors.white, // Text/Icon color
@@ -443,10 +693,8 @@ class _EmergencySharingScreenState extends State<EmergencySharingScreen> {
             ),
             const SizedBox(height: 30),
           ],
-
         ),
       ),
-
     );
   }
 }
