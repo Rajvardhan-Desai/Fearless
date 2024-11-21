@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -19,7 +20,6 @@ class EmergencySharingScreen extends ConsumerStatefulWidget {
   final List selectedOptions;
   final String reason;
 
-
   const EmergencySharingScreen({
     super.key,
     required this.selectedContacts,
@@ -38,6 +38,7 @@ class EmergencySharingScreenState
   late final userState;
   int chopCount = 0;
   bool isChopDetecting = false;
+  bool lowBatteryAlertSent = false;
 
   StreamSubscription<Position>? positionStream;
 
@@ -53,23 +54,19 @@ class EmergencySharingScreenState
     _startLiveLocationSharing();
     monitorBatteryLevel(); // Start monitoring battery level
 
-
+    sendEmergencySMSInBackground(
+      contacts: widget.selectedContacts.map((c) => c['phone']!).toList(),
+      message:
+          "\nYou're receiving this message because you're an emergency contact for ${userState.name}.",
+    );
   }
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
     // Initialize userState here safely
     userState = ref.watch(userProvider);
-
-    sendEmergencySMSInBackground(
-      contacts: widget.selectedContacts
-          .map((c) => c['phone']!)
-          .toList(),
-      message:
-      "\nYou're receiving this message because you're an emergency contact for ${userState.name}.\nPlease call or text ${userState.name} directly for updates.",
-    );
   }
-
 
   @override
   void dispose() {
@@ -285,7 +282,7 @@ class EmergencySharingScreenState
                     // Stop sharing and notify contacts without a reason
                     sendEmergencySMSInBackground(
                       message:
-                      '\n${userState.name} has stopped sharing their location.',
+                          '\n${userState.name} has stopped sharing their location.',
                       contacts: widget.selectedContacts
                           .map((c) => c['phone']!)
                           .toList(),
@@ -294,8 +291,10 @@ class EmergencySharingScreenState
                     // Navigate to home screen
                     Navigator.pushAndRemoveUntil(
                       context,
-                      MaterialPageRoute(builder: (context) => const HomeScreen(triggerEmergencySharing: false)),
-                          (route) => false,
+                      MaterialPageRoute(
+                          builder: (context) =>
+                              const HomeScreen(triggerEmergencySharing: false)),
+                      (route) => false,
                     );
                   },
                   child: const Text(
@@ -306,20 +305,29 @@ class EmergencySharingScreenState
                 ElevatedButton(
                   onPressed: isDoneEnabled
                       ? () {
-                    // Stop sharing and notify contacts with a reason
-                    sendEmergencySMSInBackground(
-                      message:
-                      '\n${userState.name} has stopped sharing their location.',
-                      contacts: widget.selectedContacts
-                          .map((c) => c['phone']!)
-                          .toList(),
-                      reason: reason,
-                    );
+                          // Stop sharing and notify contacts with a reason
+                          sendEmergencySMSInBackground(
+                            message:
+                                '\n${userState.name} has stopped sharing their location.',
+                            contacts: widget.selectedContacts
+                                .map((c) => c['phone']!)
+                                .toList(),
+                            reason: reason,
+                          );
 
-                    // Navigate to home screen
-                    Navigator.pushNamedAndRemoveUntil(
-                        context, '/home', (route) => false);
-                  }
+                          Navigator.pushAndRemoveUntil(
+                            context,
+                            MaterialPageRoute(
+                                builder: (context) => const HomeScreen(
+                                    triggerEmergencySharing: false)),
+                            (route) => false,
+                          );
+
+                          // Navigate to home screen
+                          //   Navigator.pushNamedAndRemoveUntil(
+                          //       context, '/home', (route) => false);
+                          //
+                        }
                       : null,
                   child: const Text(
                     'Done',
@@ -333,7 +341,6 @@ class EmergencySharingScreenState
       },
     );
   }
-
 
   Future<Position?> _getCurrentLocation() async {
     bool serviceEnabled;
@@ -384,11 +391,10 @@ class EmergencySharingScreenState
     required List<String> contacts,
     String? reason,
   }) async {
-
     final position = await _getCurrentLocation();
     if (position != null) {
       final locationLink =
-      generateGoogleMapsLink(position.latitude, position.longitude);
+          generateGoogleMapsLink(position.latitude, position.longitude);
       message += "\nLocation: $locationLink";
     } else {
       message += "\nUnable to fetch location.";
@@ -398,38 +404,61 @@ class EmergencySharingScreenState
       message += "\nReason: $reason";
     }
 
-    // Run the SMS sending in the background
-    Future.microtask(() async {
-      try {
-        for (String contact in contacts) {
-          try {
-            final sanitizedContact = sanitizePhoneNumber(contact);
-            await twilioFlutter.sendSMS(
-              toNumber: sanitizedContact,
-              messageBody: message,
-            );
-            debugPrint("SMS sent to $sanitizedContact");
-          } catch (error) {
-            debugPrint("Failed to send SMS to $contact: $error");
-          }
-        }
-        // Check if the widget is still mounted before showing a SnackBar
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text("Emergency SMS sent successfully!")),
-          );
-        }
-      } catch (error) {
-        debugPrint("Failed to send SMS: $error");
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text("Failed to send SMS.")),
-          );
-        }
+    // Offload SMS sending to a background isolate
+    try {
+      final result = await compute(
+          _sendBulkSMS, {'contacts': contacts, 'message': message});
+      if (result['success'] == contacts.length) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+              content: Text(
+                  "SMS sent successfully to ${contacts.length} contacts!")),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              "SMS sent to ${result['success']} out of ${contacts.length} contacts. Errors: ${result['errors']}",
+            ),
+          ),
+        );
       }
-    });
+    } catch (error) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+            content: Text("Failed to send SMS due to an unexpected error.")),
+      );
+      debugPrint("Error sending SMS: $error");
+    }
   }
 
+  Map<String, dynamic> _sendBulkSMS(Map<String, dynamic> args) {
+    final contacts = args['contacts'] as List<String>;
+    final message = args['message'] as String;
+    int successCount = 0;
+    List<String> errors = [];
+
+    final twilioFlutter = TwilioFlutter(
+      accountSid: dotenv.env['TWILIO_ACCOUNT_SID']!,
+      authToken: dotenv.env['TWILIO_AUTH_TOKEN']!,
+      twilioNumber: dotenv.env['TWILIO_NO']!,
+    );
+
+    for (String contact in contacts) {
+      try {
+        final sanitizedContact = sanitizePhoneNumber(contact);
+        twilioFlutter.sendSMS(toNumber: sanitizedContact, messageBody: message);
+        successCount++;
+      } catch (error) {
+        errors.add(contact);
+      }
+    }
+
+    return {
+      'success': successCount,
+      'errors': errors,
+    };
+  }
 
   void handleActions(String actionType) async {
     if (actionType == "phone_call" &&
@@ -474,14 +503,14 @@ class EmergencySharingScreenState
     return await battery.batteryLevel;
   }
 
-  void monitorBatteryLevel() {
+  void monitorBatteryLevel() async {
     final battery = Battery();
     battery.onBatteryStateChanged.listen((BatteryState state) async {
-      if (!mounted) return; // Exit if the widget is unmounted
-      if (state == BatteryState.discharging) {
+      if (state == BatteryState.discharging && !lowBatteryAlertSent) {
         int batteryLevel = await battery.batteryLevel;
         if (batteryLevel <= 15) {
           handleActions("low_battery");
+          lowBatteryAlertSent = true;
         }
       }
     });
