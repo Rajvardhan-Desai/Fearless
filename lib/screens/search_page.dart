@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
@@ -6,7 +7,7 @@ import 'package:flutter_polyline_points/flutter_polyline_points.dart';
 import 'package:geocoding/geocoding.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
-
+import 'package:http/http.dart' as http;
 import 'dart:async';
 
 import 'package:google_maps_webservice/places.dart' as gmw;
@@ -282,42 +283,149 @@ class SearchPageState extends State<SearchPage> {
   }
 
   Future<void> _createPolylines(
-    double startLatitude,
-    double startLongitude,
-    double destinationLatitude,
-    double destinationLongitude,
-  ) async {
+      double startLatitude,
+      double startLongitude,
+      double destinationLatitude,
+      double destinationLongitude,
+      ) async {
+    final String baseUrl = 'https://maps.googleapis.com/maps/api/directions/json';
+    final String origin = '$startLatitude,$startLongitude';
+    final String destination = '$destinationLatitude,$destinationLongitude';
+
+    final Uri uri = Uri.parse(
+      '$baseUrl?origin=$origin&destination=$destination&alternatives=true&key=$googleMapsApiKey',
+    );
+
     try {
-      PolylineResult result = await polylinePoints.getRouteBetweenCoordinates(
-        googleApiKey: googleMapsApiKey,
-        request: PolylineRequest(
-          origin: PointLatLng(startLatitude, startLongitude),
-          destination: PointLatLng(destinationLatitude, destinationLongitude),
-          mode: TravelMode.driving,
-        ),
-      );
+      final response = await http.get(uri);
 
-      if (result.status == 'OK') {
-        polylineCoordinates.clear();
-        for (var point in result.points) {
-          polylineCoordinates.add(LatLng(point.latitude, point.longitude));
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+
+        if (data['status'] == 'OK') {
+          setState(() {
+            polylineCoordinates.clear();
+            polylines.clear();
+
+            int routeIndex = 0;
+
+            for (var route in data['routes']) {
+              String encodedPolyline = route['overview_polyline']['points'];
+              List<LatLng> polylineCoords = _decodePolyline(encodedPolyline);
+
+              if (routeIndex == 0) {
+                polylineCoordinates = polylineCoords; // Set default route coordinates
+              }
+
+              PolylineId polylineId = PolylineId('route_$routeIndex');
+              polylines[polylineId] = Polyline(
+                polylineId: polylineId,
+                color: routeIndex == 0 ? Colors.blue : Colors.grey,
+                points: polylineCoords,
+                width: 5,
+                onTap: () => _onRouteTapped(routeIndex, polylineCoords),
+              );
+
+              routeIndex++;
+            }
+          });
+        } else {
+          _showSnackBar('Error: ${data['error_message']}');
         }
-
-        setState(() {
-          polylines[PolylineId('route_${DateTime.now()}')] = Polyline(
-            polylineId: PolylineId('route_${DateTime.now()}'),
-            color: Colors.blue,
-            points: polylineCoordinates,
-            width: 5,
-          );
-        });
       } else {
-        _showSnackBar('Error fetching route: ${result.errorMessage}');
+        _showSnackBar('Error fetching routes: ${response.statusCode}');
       }
     } catch (e) {
       _showSnackBar('Error creating polylines: $e');
     }
   }
+
+  void _onRouteTapped(int routeIndex, List<LatLng> selectedRoute) {
+    setState(() {
+      polylines.forEach((id, polyline) {
+        polylines[id] = polyline.copyWith(
+          colorParam: id.value == 'route_$routeIndex' ? Colors.blue : Colors.grey,
+          widthParam: id.value == 'route_$routeIndex' ? 6 : 4,
+        );
+      });
+
+      // Calculate and display the distance for the selected route
+      double totalDistance = _calculateRouteDistance(selectedRoute);
+      _placeDistance = totalDistance.toStringAsFixed(2); // Update distance
+    });
+
+    // Fit the camera to the selected route
+    LatLngBounds bounds = _getLatLngBounds(selectedRoute);
+    mapController.animateCamera(CameraUpdate.newLatLngBounds(bounds, 100));
+
+    _showSnackBar('Selected Route: $_placeDistance km');
+  }
+
+
+  LatLngBounds _getLatLngBounds(List<LatLng> points) {
+    double south = points.map((e) => e.latitude).reduce(min);
+    double west = points.map((e) => e.longitude).reduce(min);
+    double north = points.map((e) => e.latitude).reduce(max);
+    double east = points.map((e) => e.longitude).reduce(max);
+
+    return LatLngBounds(
+      southwest: LatLng(south, west),
+      northeast: LatLng(north, east),
+    );
+  }
+
+
+  double _calculateRouteDistance(List<LatLng> route) {
+    double totalDistance = 0.0;
+    for (int i = 0; i < route.length - 1; i++) {
+      totalDistance += Geolocator.distanceBetween(
+        route[i].latitude,
+        route[i].longitude,
+        route[i + 1].latitude,
+        route[i + 1].longitude,
+      );
+    }
+    return totalDistance / 1000; // Return distance in kilometers
+  }
+
+
+
+
+  List<LatLng> _decodePolyline(String encoded) {
+    List<LatLng> polyline = [];
+    int index = 0, len = encoded.length;
+    int lat = 0, lng = 0;
+
+    while (index < len) {
+      int shift = 0, result = 0;
+      int b;
+      do {
+        b = encoded.codeUnitAt(index++) - 63;
+        result |= (b & 0x1f) << shift;
+        shift += 5;
+      } while (b >= 0x20);
+      int dlat = (result & 1) != 0 ? ~(result >> 1) : (result >> 1);
+      lat += dlat;
+
+      shift = 0;
+      result = 0;
+      do {
+        b = encoded.codeUnitAt(index++) - 63;
+        result |= (b & 0x1f) << shift;
+        shift += 5;
+      } while (b >= 0x20);
+      int dlng = (result & 1) != 0 ? ~(result >> 1) : (result >> 1);
+      lng += dlng;
+
+      polyline.add(LatLng(lat / 1E5, lng / 1E5));
+    }
+
+    return polyline;
+  }
+
+
+
+
 
   Widget _textField({
     required TextEditingController controller,
@@ -638,29 +746,27 @@ class SearchPageState extends State<SearchPage> {
             ),
             SizedBox(height: 5),
             ElevatedButton(
-              onPressed:
-                  (_startAddress.isNotEmpty && _destinationAddress.isNotEmpty)
-                      ? () async {
-                          startAddressFocusNode.unfocus();
-                          destinationAddressFocusNode.unfocus();
-                          setState(() {
-                            markers.clear();
-                            polylines.clear();
-                            polylineCoordinates.clear();
-                            _placeDistance = null;
-                          });
+              onPressed: (_startAddress.isNotEmpty && _destinationAddress.isNotEmpty)
+                  ? () async {
+                startAddressFocusNode.unfocus();
+                destinationAddressFocusNode.unfocus();
+                setState(() {
+                  markers.clear();
+                  polylines.clear();
+                  polylineCoordinates.clear();
+                  _placeDistance = null;
+                });
 
-                          bool isCalculated = await _calculateDistance();
-                          if (isCalculated) {
-                            _showSnackBar('Distance Calculated Successfully');
-                          } else {
-                            _showSnackBar('Error Calculating Distance');
-                          }
-                        }
-                      : null,
+                bool isCalculated = await _calculateDistance();
+                if (isCalculated) {
+                  _showSnackBar('Distance Calculated Successfully');
+                } else {
+                  _showSnackBar('Error Calculating Distance');
+                }
+              }
+                  : null,
               style: ElevatedButton.styleFrom(
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(20.0)),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20.0)),
                 backgroundColor: Color(0xff6c5270),
               ),
               child: Padding(
@@ -671,6 +777,7 @@ class SearchPageState extends State<SearchPage> {
                 ),
               ),
             ),
+
           ],
         ),
       ),

@@ -54,11 +54,7 @@ class EmergencySharingScreenState
     _startLiveLocationSharing();
     monitorBatteryLevel(); // Start monitoring battery level
 
-    sendEmergencySMSInBackground(
-      contacts: widget.selectedContacts.map((c) => c['phone']!).toList(),
-      message:
-          "\nYou're receiving this message because you're an emergency contact for ${userState.name}.",
-    );
+
   }
 
   @override
@@ -66,6 +62,12 @@ class EmergencySharingScreenState
     super.didChangeDependencies();
     // Initialize userState here safely
     userState = ref.watch(userProvider);
+
+    sendEmergencySMSInBackground(
+      contacts: widget.selectedContacts.map((c) => c['phone']!).toList(),
+      message:
+      "\nYou're receiving this message because you're an emergency contact for ${userState.name}.",
+    );
   }
 
   @override
@@ -118,7 +120,7 @@ class EmergencySharingScreenState
         _isSharing = false;
       });
     } else {
-      _isSharing = false; // Update the variable directly without setState
+      _isSharing = false; // Update the variable directly without calling setState
     }
   }
 
@@ -282,20 +284,21 @@ class EmergencySharingScreenState
                     // Stop sharing and notify contacts without a reason
                     sendEmergencySMSInBackground(
                       message:
-                          '\n${userState.name} has stopped sharing their location.',
-                      contacts: widget.selectedContacts
-                          .map((c) => c['phone']!)
-                          .toList(),
+                      '\n${userState.name} has stopped sharing their location.',
+                      contacts: widget.selectedContacts.map((c) => c['phone']!).toList(),
                     );
 
                     // Navigate to home screen
-                    Navigator.pushAndRemoveUntil(
-                      context,
-                      MaterialPageRoute(
+                    if (mounted) {
+                      Navigator.pushAndRemoveUntil(
+                        context,
+                        MaterialPageRoute(
                           builder: (context) =>
-                              const HomeScreen(triggerEmergencySharing: false)),
-                      (route) => false,
-                    );
+                          const HomeScreen(triggerEmergencySharing: false),
+                        ),
+                            (route) => false,
+                      );
+                    }
                   },
                   child: const Text(
                     'Skip',
@@ -391,10 +394,11 @@ class EmergencySharingScreenState
     required List<String> contacts,
     String? reason,
   }) async {
+    // Fetch the current location
     final position = await _getCurrentLocation();
     if (position != null) {
       final locationLink =
-          generateGoogleMapsLink(position.latitude, position.longitude);
+      generateGoogleMapsLink(position.latitude, position.longitude);
       message += "\nLocation: $locationLink";
     } else {
       message += "\nUnable to fetch location.";
@@ -404,33 +408,31 @@ class EmergencySharingScreenState
       message += "\nReason: $reason";
     }
 
-    // Offload SMS sending to a background isolate
-    try {
-      final result = await compute(
-          _sendBulkSMS, {'contacts': contacts, 'message': message});
-      if (result['success'] == contacts.length) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-              content: Text(
-                  "SMS sent successfully to ${contacts.length} contacts!")),
-        );
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              "SMS sent to ${result['success']} out of ${contacts.length} contacts. Errors: ${result['errors']}",
-            ),
-          ),
-        );
+    // Send SMS to each contact
+    int successCount = 0;
+    List<String> errors = [];
+    for (String contact in contacts) {
+      try {
+        final sanitizedContact = sanitizePhoneNumber(contact);
+        await twilioFlutter.sendSMS(toNumber: sanitizedContact, messageBody: message);
+        successCount++;
+      } catch (error) {
+        errors.add(contact);
       }
-    } catch (error) {
+    }
+
+    // Show a SnackBar with the result
+    if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-            content: Text("Failed to send SMS due to an unexpected error.")),
+        SnackBar(
+          content: Text(
+            "SMS sent to $successCount out of ${contacts.length} contacts. Errors: ${errors.length}",
+          ),
+        ),
       );
-      debugPrint("Error sending SMS: $error");
     }
   }
+
 
   Map<String, dynamic> _sendBulkSMS(Map<String, dynamic> args) {
     final contacts = args['contacts'] as List<String>;

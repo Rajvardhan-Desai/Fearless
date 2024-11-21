@@ -57,25 +57,31 @@ class HomeScreenState extends ConsumerState<HomeScreen>
   @override
   void initState() {
     super.initState();
-
     _selectedIndex = widget.initialIndex;
 
     final userNotifier = ref.read(userProvider.notifier);
 
-    // Add observer for lifecycle handling
-    WidgetsBinding.instance.addObserver(this);
 
-    // Combine delayed actions
+    if (widget.triggerEmergencySharing) {
+      _startPowerButtonService();
+      _sharingChannel.setMethodCallHandler(_handleMethodCall);
+
+      // Delay the bottom sheet display to allow the screen to build
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _showEmergencySharingBottomSheet();
+      });
+    }
+
+    WidgetsBinding.instance.addObserver(this);
+    ShakeServiceController.listenForEmergencySharing(() {
+      _showEmergencySharingBottomSheet();
+    });
+    // Optionally start the service automatically
+    // ShakeServiceController.startService();
+
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       try {
-        // Fetch user data
         await userNotifier.fetchUserData();
-
-        // Show emergency sharing sheet if triggered and not already shown
-        if (widget.triggerEmergencySharing && !_hasShownEmergencySharing) {
-          _hasShownEmergencySharing = true; // Mark as shown
-          _showEmergencySharingBottomSheet();
-        }
 
         setState(() {
           _isLoading = false;
@@ -83,11 +89,6 @@ class HomeScreenState extends ConsumerState<HomeScreen>
       } catch (error) {
         _showErrorSnackBar(error.toString());
       }
-    });
-
-    // Set up emergency shake detection
-    ShakeServiceController.listenForEmergencySharing(() {
-      _showEmergencySharingBottomSheet();
     });
   }
 
