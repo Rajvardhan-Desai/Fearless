@@ -23,13 +23,15 @@ class HomeScreen extends ConsumerStatefulWidget {
   final int initialIndex;
   final bool triggerEmergencySharing;
 
-  const HomeScreen({super.key, this.initialIndex = 0, this.triggerEmergencySharing = false});
+  const HomeScreen(
+      {super.key, this.initialIndex = 0, this.triggerEmergencySharing = false});
 
   @override
   HomeScreenState createState() => HomeScreenState();
 }
 
-class HomeScreenState extends ConsumerState<HomeScreen> with WidgetsBindingObserver{
+class HomeScreenState extends ConsumerState<HomeScreen>
+    with WidgetsBindingObserver {
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey();
   final TextEditingController _reasonController = TextEditingController();
   late int _selectedIndex;
@@ -37,8 +39,14 @@ class HomeScreenState extends ConsumerState<HomeScreen> with WidgetsBindingObser
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   bool _isLoading = true;
 
-  static const MethodChannel _powerButtonChannel = MethodChannel('com.fearless.app/powerbutton');
-  static const MethodChannel _sharingChannel = MethodChannel('com.fearless.app/sharing');
+
+  // Track if the emergency sharing sheet has been shown
+  bool _hasShownEmergencySharing = false;
+
+  static const MethodChannel _powerButtonChannel =
+      MethodChannel('com.fearless.app/powerbutton');
+  static const MethodChannel _sharingChannel =
+      MethodChannel('com.fearless.app/sharing');
 
   final TwilioFlutter twilioFlutter = TwilioFlutter(
     accountSid: dotenv.env['TWILIO_ACCOUNT_SID']!,
@@ -46,7 +54,6 @@ class HomeScreenState extends ConsumerState<HomeScreen> with WidgetsBindingObser
     twilioNumber: dotenv.env['TWILIO_NO']!,
   );
 
-  @override
   @override
   void initState() {
     super.initState();
@@ -56,24 +63,20 @@ class HomeScreenState extends ConsumerState<HomeScreen> with WidgetsBindingObser
     final userNotifier = ref.read(userProvider.notifier);
 
     // Add observer for lifecycle handling
-    WidgetsBinding.instance?.addObserver(this);
-
-    // Set up services for emergency sharing
-    if (widget.triggerEmergencySharing) {
-      _startPowerButtonService();
-      _sharingChannel.setMethodCallHandler(_handleMethodCall);
-    }
+    WidgetsBinding.instance.addObserver(this);
 
     // Combine delayed actions
-    WidgetsBinding.instance?.addPostFrameCallback((_) async {
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
       try {
-        // Show emergency sharing sheet if triggered
-        if (widget.triggerEmergencySharing) {
+        // Fetch user data
+        await userNotifier.fetchUserData();
+
+        // Show emergency sharing sheet if triggered and not already shown
+        if (widget.triggerEmergencySharing && !_hasShownEmergencySharing) {
+          _hasShownEmergencySharing = true; // Mark as shown
           _showEmergencySharingBottomSheet();
         }
 
-        // Fetch user data
-        await userNotifier.fetchUserData();
         setState(() {
           _isLoading = false;
         });
@@ -87,6 +90,7 @@ class HomeScreenState extends ConsumerState<HomeScreen> with WidgetsBindingObser
       _showEmergencySharingBottomSheet();
     });
   }
+
 
 
   @override
@@ -104,7 +108,6 @@ class HomeScreenState extends ConsumerState<HomeScreen> with WidgetsBindingObser
       debugPrint("Failed to start power button service: ${e.message}");
     }
   }
-
 
   Future<void> _stopPowerButtonService() async {
     try {
@@ -130,14 +133,13 @@ class HomeScreenState extends ConsumerState<HomeScreen> with WidgetsBindingObser
     );
   }
 
-
-
   Future<void> _checkBatteryOptimization() async {
     DeviceInfoPlugin deviceInfo = DeviceInfoPlugin();
     AndroidDeviceInfo androidInfo = await deviceInfo.androidInfo;
     if (androidInfo.version.sdkInt >= 23) {
       const platform = MethodChannel('com.fearless.app/powerbutton');
-      bool isIgnoring = await platform.invokeMethod('isIgnoringBatteryOptimizations');
+      bool isIgnoring =
+          await platform.invokeMethod('isIgnoringBatteryOptimizations');
       if (!isIgnoring) {
         // Show dialog to ask user to disable battery optimization
         // Provide a button to open settings
@@ -149,7 +151,6 @@ class HomeScreenState extends ConsumerState<HomeScreen> with WidgetsBindingObser
       }
     }
   }
-
 
   void _onItemTapped(int index) {
     setState(() {
@@ -163,7 +164,7 @@ class HomeScreenState extends ConsumerState<HomeScreen> with WidgetsBindingObser
 
     final List<Widget> widgetOptions = [
       _isLoading ? _buildShimmerHomeContent() : _buildHomeContent(userState),
-      const SearchPage(),
+      SearchPage(),
       const NewsPage(),
       ProfilePage(
         userName: userState.name,
@@ -709,8 +710,6 @@ class HomeScreenState extends ConsumerState<HomeScreen> with WidgetsBindingObser
                                         .map((option) => option['title'])
                                         .toList();
 
-
-
                                     // Navigate to EmergencySharingScreen
                                     Navigator.of(context).push(
                                       MaterialPageRoute(
@@ -789,7 +788,6 @@ class HomeScreenState extends ConsumerState<HomeScreen> with WidgetsBindingObser
     return await Geolocator.getCurrentPosition(
       desiredAccuracy: LocationAccuracy.best,
     );
-
   }
 
   Future<void> sendEmergencySMSInBackground({

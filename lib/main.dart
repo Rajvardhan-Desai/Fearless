@@ -67,16 +67,29 @@ class MyAppState extends ConsumerState<MyApp> {
   }
 
   void _triggerEmergencySharing() {
-    // Use the navigator key to navigate
-    navigatorKey.currentState?.push(
-      MaterialPageRoute(
-        builder: (context) => const HomeScreen(
-          initialIndex: 0, // Ensure we navigate to the Home tab
-          triggerEmergencySharing: true, // Pass a flag to trigger sharing
+    // Get the current user from FirebaseAuth
+    final user = ref.read(firebaseAuthProvider).currentUser;
+
+    if (user == null) {
+      // User is not logged in; navigate to the SignInScreen
+      navigatorKey.currentState?.push(
+        MaterialPageRoute(
+          builder: (context) => const SignInScreen(),
         ),
-      ),
-    );
+      );
+    } else {
+      // User is logged in; navigate to the HomeScreen
+      navigatorKey.currentState?.push(
+        MaterialPageRoute(
+          builder: (context) => const HomeScreen(
+            initialIndex: 0, // Navigate to the Home tab
+            triggerEmergencySharing: true, // Trigger the sharing action
+          ),
+        ),
+      );
+    }
   }
+
 
   @override
   Widget build(BuildContext context) {

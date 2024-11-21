@@ -1,260 +1,438 @@
-import 'dart:async';
-import 'dart:convert';
+import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
-import 'package:google_maps_flutter/google_maps_flutter.dart';
-import 'package:http/http.dart' as http;
 import 'package:flutter_polyline_points/flutter_polyline_points.dart';
-import 'package:google_place/google_place.dart';
-import 'package:permission_handler/permission_handler.dart';
+import 'package:geocoding/geocoding.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
 
-// Riverpod state management
-final navigationStateProvider = StateNotifierProvider<NavigationStateNotifier, NavigationState>(
-      (ref) => NavigationStateNotifier(),
-);
+import 'dart:async';
 
-class NavigationState {
-  final bool isLoading;
-  final bool isNavigating;
-  final bool isRouteActive;
-  final String? travelInfo;
+import 'package:google_maps_webservice/places.dart' as gmw;
 
-  NavigationState({
-    this.isLoading = false,
-    this.isNavigating = false,
-    this.isRouteActive = false,
-    this.travelInfo,
-  });
-
-  NavigationState copyWith({
-    bool? isLoading,
-    bool? isNavigating,
-    bool? isRouteActive,
-    String? travelInfo,
-  }) {
-    return NavigationState(
-      isLoading: isLoading ?? this.isLoading,
-      isNavigating: isNavigating ?? this.isNavigating,
-      isRouteActive: isRouteActive ?? this.isRouteActive,
-      travelInfo: travelInfo ?? this.travelInfo,
-    );
-  }
-}
-
-class NavigationStateNotifier extends StateNotifier<NavigationState> {
-  NavigationStateNotifier() : super(NavigationState());
-
-  void setLoading(bool loading) {
-    state = state.copyWith(isLoading: loading);
-  }
-
-  void setNavigating(bool navigating) {
-    state = state.copyWith(isNavigating: navigating);
-  }
-
-  void setRouteActive(bool active) {
-    state = state.copyWith(isRouteActive: active);
-  }
-
-  void setTravelInfo(String? info) {
-    state = state.copyWith(travelInfo: info);
-  }
-
-  void clear() {
-    state = NavigationState();
-  }
-}
-
-// Debouncer
-class Debouncer {
-  final int milliseconds;
-  Timer? _timer;
-
-  Debouncer({required this.milliseconds});
-
-  void run(VoidCallback action) {
-    _timer?.cancel();
-    _timer = Timer(Duration(milliseconds: milliseconds), action);
-  }
-}
-
-class SearchPage extends ConsumerStatefulWidget {
+class SearchPage extends StatefulWidget {
   const SearchPage({super.key});
 
   @override
   SearchPageState createState() => SearchPageState();
 }
 
-class SearchPageState extends ConsumerState<SearchPage> {
-  final TextEditingController _sourceController = TextEditingController();
-  final TextEditingController _destinationController = TextEditingController();
+class SearchPageState extends State<SearchPage> {
+  CameraPosition _initialLocation = const CameraPosition(
+    target: LatLng(18.516726, 73.856255),
+    zoom: 12.0,
+  ); // Example: San Francisco
+  late GoogleMapController mapController;
+  bool _isTrafficEnabled = true;
 
-  final Debouncer _debouncer = Debouncer(milliseconds: 500);
-  Completer<GoogleMapController> _mapController = Completer();
-  static const LatLng _initialPosition = LatLng(18.516726, 73.856255);
-  Marker? _sourceMarker;
-  Marker? _destinationMarker;
-  Map<PolylineId, Polyline> _polylines = {};
-  final Map<String, LatLng> _geocodeCache = {};
-  late GooglePlace _googlePlace;
+  late gmw.GoogleMapsPlaces places;
+
+  Future<List<gmw.Prediction>> _fetchPlaceSuggestions(String input) async {
+    if (input.isEmpty) return [];
+    try {
+      final response = await places.autocomplete(input);
+      if (response.isOkay) {
+        return response.predictions;
+      } else {
+        print("Error fetching place suggestions: ${response.errorMessage}");
+        _showSnackBar('Error fetching suggestions: ${response.errorMessage}');
+        return [];
+      }
+    } catch (e) {
+      print("Exception fetching suggestions: $e");
+      _showSnackBar('Exception: $e');
+      return [];
+    }
+  }
+
   Position? _currentPosition;
-  final String _googleApiKey = dotenv.env['GOOGLE_MAPS_API_KEY']!;
-  late StreamSubscription<Position> _positionSubscription;
+  String _currentAddress = '';
+
+  final startAddressController = TextEditingController();
+  final destinationAddressController = TextEditingController();
+
+  final startAddressFocusNode = FocusNode();
+  final destinationAddressFocusNode = FocusNode();
+
+  String _startAddress = '';
+  String _destinationAddress = '';
+  String? _placeDistance;
+
+  Set<Marker> markers = {};
+
+  late PolylinePoints polylinePoints;
+  Map<PolylineId, Polyline> polylines = {};
+  List<LatLng> polylineCoordinates = [];
+
+  final _scaffoldKey = GlobalKey<ScaffoldState>();
+  final String googleMapsApiKey = dotenv.env['GOOGLE_MAPS_API_KEY']!;
+
+  bool _isLoading = false;
 
   @override
   void initState() {
     super.initState();
-    _googlePlace = GooglePlace(_googleApiKey);
-    _requestLocationPermission();
-    _startLocationUpdates();
+    _checkPermissions();
+    polylinePoints = PolylinePoints();
+    places = gmw.GoogleMapsPlaces(apiKey: dotenv.env['GOOGLE_MAPS_API_KEY']!);
   }
 
-  @override
-  void dispose() {
-    _positionSubscription.cancel();
-    _sourceController.dispose();
-    _destinationController.dispose();
-    super.dispose();
-  }
+  Future<void> _checkPermissions() async {
+    bool serviceEnabled;
+    LocationPermission permission;
 
-  Future<void> _requestLocationPermission() async {
-    final status = await Permission.location.request();
-    if (status != PermissionStatus.granted) {
-      _showErrorDialog('Location permission is required.');
+    // Check if location services are enabled
+    serviceEnabled = await Geolocator.isLocationServiceEnabled();
+    if (!serviceEnabled) {
+      _showSnackBar('Location services are disabled.');
+      setState(() {
+        _isLoading = false;
+      });
       return;
     }
-    _getCurrentLocation();
+
+    // Check for permissions
+    permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied) {
+      permission = await Geolocator.requestPermission();
+      if (permission == LocationPermission.denied) {
+        _showSnackBar('Location permissions are denied');
+        setState(() {
+          _isLoading = false;
+        });
+        return;
+      }
+    }
+
+    if (permission == LocationPermission.deniedForever) {
+      _showSnackBar('Location permissions are permanently denied.');
+      setState(() {
+        _isLoading = false;
+      });
+      return;
+    }
+
+    // Permissions are granted, proceed
   }
 
   Future<void> _getCurrentLocation() async {
     try {
-      Position position = await Geolocator.getCurrentPosition(
-          desiredAccuracy: LocationAccuracy.high);
-      _currentPosition = position;
-    } catch (e) {
-      _showErrorDialog('Failed to get current location: $e');
-    }
-  }
+      // Try last known location first
+      Position? lastKnownPosition = await Geolocator.getLastKnownPosition();
+      if (lastKnownPosition != null && mounted) {
+        setState(() {
+          _currentPosition = lastKnownPosition;
+          _initialLocation = CameraPosition(
+            target:
+                LatLng(lastKnownPosition.latitude, lastKnownPosition.longitude),
+            zoom: 18.0,
+          );
+        });
+        mapController
+            .animateCamera(CameraUpdate.newCameraPosition(_initialLocation));
+      }
 
-  void _startLocationUpdates() {
-    _positionSubscription = Geolocator.getPositionStream(
-      locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
-    ).listen((Position position) {
+      // Fetch updated location in background
+      Position position = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.high,
+      );
+
       if (mounted) {
         setState(() {
           _currentPosition = position;
-          _sourceMarker = Marker(
-            markerId: const MarkerId('current_location'),
-            position: LatLng(position.latitude, position.longitude),
-            infoWindow: const InfoWindow(title: 'Current Location'),
-            icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueBlue),
+          _initialLocation = CameraPosition(
+            target: LatLng(position.latitude, position.longitude),
+            zoom: 18.0,
           );
         });
-
-        if (ref.read(navigationStateProvider).isNavigating && _destinationMarker != null) {
-          _getDirections(
-            LatLng(position.latitude, position.longitude),
-            _destinationMarker!.position,
-          );
-        }
+        mapController
+            .animateCamera(CameraUpdate.newCameraPosition(_initialLocation));
+        await _getAddress();
       }
-    });
-  }
-
-  Future<void> _getDirections(LatLng source, LatLng destination) async {
-    final String url =
-        'https://maps.googleapis.com/maps/api/directions/json?origin=${source.latitude},${source.longitude}&destination=${destination.latitude},${destination.longitude}&key=$_googleApiKey';
-
-    final response = await http.get(Uri.parse(url));
-    final json = jsonDecode(response.body);
-
-    if (json['status'] == 'OK') {
-      final route = json['routes'][0];
-      final overviewPolyline = route['overview_polyline']['points'];
-      final points = PolylinePoints().decodePolyline(overviewPolyline);
-
-      final coordinates = points.map((point) => LatLng(point.latitude, point.longitude)).toList();
-      _addPolyline(coordinates);
-    } else {
-      throw Exception('Failed to fetch directions');
+    } catch (e) {
+      if (mounted) {
+        _showSnackBar('Error getting location: $e');
+      }
     }
   }
 
-  void _addPolyline(List<LatLng> coordinates) {
-    final polylineId = PolylineId('route');
-    final polyline = Polyline(
-      polylineId: polylineId,
-      points: coordinates,
-      width: 5,
-      color: Colors.blue,
-    );
-    setState(() {
-      _polylines[polylineId] = polyline;
-    });
+  Future<void> _getAddress() async {
+    if (_currentPosition == null) return;
+    try {
+      List<Placemark> placemarks = await placemarkFromCoordinates(
+        _currentPosition!.latitude,
+        _currentPosition!.longitude,
+      );
+      Placemark place = placemarks[0];
+      if (mounted) {
+        setState(() {
+          _currentAddress =
+              "${place.name}, ${place.locality}, ${place.postalCode}, ${place.country}";
+          startAddressController.text = _currentAddress;
+          _startAddress = _currentAddress;
+        });
+      }
+    } catch (e) {
+      _showSnackBar('Error getting address: $e');
+    }
   }
 
-  Widget _buildAutocomplete(
-      String label, TextEditingController controller, bool isSource) {
-    return Autocomplete<AutocompletePrediction>(
-      optionsBuilder: (TextEditingValue textEditingValue) async {
-        if (textEditingValue.text.isEmpty) {
-          return const Iterable<AutocompletePrediction>.empty();
+  Future<bool> _calculateDistance() async {
+    try {
+      if (_startAddress.isEmpty ||
+          _destinationAddress.isEmpty ||
+          _currentPosition == null) {
+        _showSnackBar('Invalid addresses or location');
+        return false;
+      }
+
+      List<Location> startPlacemark = await locationFromAddress(_startAddress);
+      List<Location> destinationPlacemark =
+          await locationFromAddress(_destinationAddress);
+
+      double startLatitude = _startAddress == _currentAddress
+          ? _currentPosition!.latitude
+          : startPlacemark[0].latitude;
+
+      double startLongitude = _startAddress == _currentAddress
+          ? _currentPosition!.longitude
+          : startPlacemark[0].longitude;
+
+      double destinationLatitude = destinationPlacemark[0].latitude;
+      double destinationLongitude = destinationPlacemark[0].longitude;
+
+      String startCoordinatesString = '($startLatitude, $startLongitude)';
+      String destinationCoordinatesString =
+          '($destinationLatitude, $destinationLongitude)';
+
+      Marker startMarker = Marker(
+        markerId: MarkerId(startCoordinatesString),
+        position: LatLng(startLatitude, startLongitude),
+        infoWindow: InfoWindow(title: 'Start', snippet: _startAddress),
+        icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen),
+      );
+
+      Marker destinationMarker = Marker(
+        markerId: MarkerId(destinationCoordinatesString),
+        position: LatLng(destinationLatitude, destinationLongitude),
+        infoWindow:
+            InfoWindow(title: 'Destination', snippet: _destinationAddress),
+        icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
+      );
+
+      setState(() {
+        markers.add(startMarker);
+        markers.add(destinationMarker);
+      });
+
+      LatLngBounds bounds;
+      if (startLatitude > destinationLatitude &&
+          startLongitude > destinationLongitude) {
+        bounds = LatLngBounds(
+          southwest: LatLng(destinationLatitude, destinationLongitude),
+          northeast: LatLng(startLatitude, startLongitude),
+        );
+      } else if (startLongitude > destinationLongitude) {
+        bounds = LatLngBounds(
+          southwest: LatLng(startLatitude, destinationLongitude),
+          northeast: LatLng(destinationLatitude, startLongitude),
+        );
+      } else if (startLatitude > destinationLatitude) {
+        bounds = LatLngBounds(
+          southwest: LatLng(destinationLatitude, startLongitude),
+          northeast: LatLng(startLatitude, destinationLongitude),
+        );
+      } else {
+        bounds = LatLngBounds(
+          southwest: LatLng(startLatitude, startLongitude),
+          northeast: LatLng(destinationLatitude, destinationLongitude),
+        );
+      }
+
+      mapController.animateCamera(CameraUpdate.newLatLngBounds(bounds, 100.0));
+
+      await _createPolylines(
+        startLatitude,
+        startLongitude,
+        destinationLatitude,
+        destinationLongitude,
+      );
+
+      double totalDistance = 0.0;
+      for (int i = 0; i < polylineCoordinates.length - 1; i++) {
+        totalDistance += Geolocator.distanceBetween(
+          polylineCoordinates[i].latitude,
+          polylineCoordinates[i].longitude,
+          polylineCoordinates[i + 1].latitude,
+          polylineCoordinates[i + 1].longitude,
+        );
+      }
+
+      setState(() {
+        _placeDistance =
+            (totalDistance / 1000).toStringAsFixed(2); // Convert to km
+      });
+
+      return true;
+    } catch (e) {
+      _showSnackBar('Error calculating distance: $e');
+      return false;
+    }
+  }
+
+  Future<void> _createPolylines(
+    double startLatitude,
+    double startLongitude,
+    double destinationLatitude,
+    double destinationLongitude,
+  ) async {
+    try {
+      PolylineResult result = await polylinePoints.getRouteBetweenCoordinates(
+        googleApiKey: googleMapsApiKey,
+        request: PolylineRequest(
+          origin: PointLatLng(startLatitude, startLongitude),
+          destination: PointLatLng(destinationLatitude, destinationLongitude),
+          mode: TravelMode.driving,
+        ),
+      );
+
+      if (result.status == 'OK') {
+        polylineCoordinates.clear();
+        for (var point in result.points) {
+          polylineCoordinates.add(LatLng(point.latitude, point.longitude));
         }
 
-        // Handle predictions with debouncing
-        final completer = Completer<Iterable<AutocompletePrediction>>();
-        _debouncer.run(() async {
-          final predictions = await _googlePlace.autocomplete.get(
-            textEditingValue.text,
-            language: "en",
+        setState(() {
+          polylines[PolylineId('route_${DateTime.now()}')] = Polyline(
+            polylineId: PolylineId('route_${DateTime.now()}'),
+            color: Colors.blue,
+            points: polylineCoordinates,
+            width: 5,
           );
-          completer.complete(predictions?.predictions ?? const Iterable<AutocompletePrediction>.empty());
         });
+      } else {
+        _showSnackBar('Error fetching route: ${result.errorMessage}');
+      }
+    } catch (e) {
+      _showSnackBar('Error creating polylines: $e');
+    }
+  }
 
-        return completer.future;
-      },
-      displayStringForOption: (AutocompletePrediction option) =>
-      option.description ?? '',
-      onSelected: (AutocompletePrediction selection) {
-        controller.text = selection.description ?? '';
-      },
-      fieldViewBuilder: (BuildContext context, TextEditingController fieldController,
-          FocusNode focusNode, VoidCallback onFieldSubmitted) {
-        return TextField(
-          controller: fieldController,
-          focusNode: focusNode,
-          decoration: InputDecoration(
-            hintText: label,
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(8),
-              borderSide: const BorderSide(color: Colors.grey, width: 2.0),
+  Widget _textField({
+    required TextEditingController controller,
+    required FocusNode focusNode,
+    required String label,
+    required String hint,
+    required double width,
+    required Icon prefixIcon,
+    Widget? suffixIcon,
+    required Function(String) locationCallback,
+  }) {
+    return Container(
+      width: width * 0.8,
+      child: GestureDetector(
+        onTap: () async {
+          // Trigger Autocomplete
+          showModalBottomSheet(
+            context: context,
+            builder: (BuildContext context) {
+              return _buildPlaceAutocomplete(controller, locationCallback);
+            },
+          );
+        },
+        child: AbsorbPointer(
+          child: TextField(
+            controller: controller,
+            focusNode: focusNode,
+            decoration: InputDecoration(
+              prefixIcon: prefixIcon,
+              suffixIcon: suffixIcon,
+              labelText: label,
+              filled: true,
+              fillColor: Colors.white,
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.all(Radius.circular(10.0)),
+                borderSide: BorderSide(color: Colors.grey.shade400, width: 2),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.all(Radius.circular(10.0)),
+                borderSide: BorderSide(color: Colors.blue.shade300, width: 2),
+              ),
+              contentPadding: EdgeInsets.all(15),
+              hintText: hint,
             ),
-            filled: true,
-            fillColor: Colors.white,
-            contentPadding: const EdgeInsets.symmetric(horizontal: 16),
-            prefixIcon: isSource ? const Icon(Icons.location_on) : const Icon(Icons.flag),
           ),
-        );
-      },
+        ),
+      ),
     );
   }
 
-  void _showErrorDialog(String message) {
-    showDialog(
-      context: context,
-      builder: (BuildContext context) {
-        return AlertDialog(
-          title: const Text('Error'),
-          content: Text(message),
-          actions: <Widget>[
-            TextButton(
-              child: const Text('OK'),
-              onPressed: () {
-                Navigator.of(context).pop();
-              },
+  Widget _buildPlaceAutocomplete(
+    TextEditingController controller,
+    Function(String) locationCallback,
+  ) {
+    // Move suggestions outside to maintain state
+    List<gmw.Prediction> suggestions = [];
+    Timer? _debounce;
+    bool _isLoadingSuggestions = false;
+
+    return StatefulBuilder(
+      builder: (context, setState) {
+        return Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.all(10.0),
+              child: TextField(
+                autofocus: true,
+                onChanged: (value) async {
+                  if (_debounce?.isActive ?? false) _debounce!.cancel();
+                  _debounce =
+                      Timer(const Duration(milliseconds: 500), () async {
+                    if (value.isNotEmpty) {
+                      setState(() {
+                        _isLoadingSuggestions = true;
+                      });
+                      var fetchedSuggestions =
+                          await _fetchPlaceSuggestions(value);
+                      setState(() {
+                        suggestions = fetchedSuggestions;
+                        _isLoadingSuggestions = false;
+                      });
+                    } else {
+                      setState(() {
+                        suggestions = [];
+                        _isLoadingSuggestions = false;
+                      });
+                    }
+                  });
+                },
+                decoration: const InputDecoration(
+                  labelText: 'Search for a place',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+            ),
+            Expanded(
+              child: _isLoadingSuggestions
+                  ? Center(child: CircularProgressIndicator())
+                  : suggestions.isEmpty
+                      ? Center(child: Text('No suggestions found'))
+                      : ListView.builder(
+                          itemCount: suggestions.length,
+                          itemBuilder: (context, index) {
+                            return ListTile(
+                              title: Text(
+                                  suggestions[index].description ?? 'Unknown'),
+                              onTap: () {
+                                controller.text =
+                                    suggestions[index].description ?? '';
+                                locationCallback(controller.text);
+                                Navigator.pop(context);
+                              },
+                            );
+                          },
+                        ),
             ),
           ],
         );
@@ -262,56 +440,270 @@ class SearchPageState extends ConsumerState<SearchPage> {
     );
   }
 
+  void _showSnackBar(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message)),
+    );
+  }
+
+  Timer? _debounce;
+
+  @override
+  void dispose() {
+    _debounce?.cancel(); // Dispose debounce
+    startAddressController.dispose();
+    destinationAddressController.dispose();
+    startAddressFocusNode.dispose();
+    destinationAddressFocusNode.dispose();
+    mapController.dispose();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
-    final navigationState = ref.watch(navigationStateProvider);
+    var width = MediaQuery.of(context).size.width;
+
     return Scaffold(
-      body: Stack(
-        children: [
-          Positioned.fill(
-            child: GoogleMap(
-              initialCameraPosition: const CameraPosition(target: _initialPosition, zoom: 12),
-              myLocationEnabled: true,
-              myLocationButtonEnabled: true,
-              zoomControlsEnabled: false,
-              markers: {
-                if (_sourceMarker != null) _sourceMarker!,
-                if (_destinationMarker != null) _destinationMarker!,
-              },
-              polylines: navigationState.isNavigating ? Set<Polyline>.of(_polylines.values) : {},
-              onMapCreated: (GoogleMapController controller) {
-                _mapController.complete(controller);
-              },
-            ),
-          ),
-          Positioned(
-            top: 40,
-            left: 15,
-            right: 15,
-            child: Column(
-              children: [
-                _buildAutocomplete('Enter Source', _sourceController, true),
-                const SizedBox(height: 10),
-                _buildAutocomplete('Enter Destination', _destinationController, false),
-              ],
-            ),
-          ),
-          Positioned(
-            bottom: 30,
-            right: 15,
-            child: Column(
-              children: [
-                FloatingActionButton(
-                  onPressed: navigationState.isNavigating ? null : () => _getDirections(
-                    LatLng(18.516726, 73.856255), // Example source
-                    LatLng(19.0760, 72.8777), // Example destination
+      key: _scaffoldKey,
+      body: _isLoading
+          ? Center(child: CircularProgressIndicator())
+          : Stack(
+              children: <Widget>[
+                // Map View
+                GoogleMap(
+                  markers: markers,
+                  initialCameraPosition: _initialLocation,
+                  myLocationEnabled: true,
+                  myLocationButtonEnabled: false,
+                  mapType: MapType.normal,
+                  trafficEnabled:
+                      _isTrafficEnabled, // Add this line for traffic overlay
+                  zoomGesturesEnabled: true,
+                  zoomControlsEnabled: false,
+                  polylines: Set<Polyline>.of(polylines.values),
+                  onMapCreated: (GoogleMapController controller) {
+                    print("Map created successfully");
+                    mapController = controller;
+                    _getCurrentLocation();
+                  },
+                ),
+
+                // Zoom Buttons
+                SafeArea(
+                  child: Padding(
+                    padding: const EdgeInsets.only(left: 10.0, bottom: 10.0),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      children: <Widget>[
+                        _trafficButton(Icons.traffic_outlined, () {
+                          setState(() {
+                            _isTrafficEnabled = !_isTrafficEnabled;
+                          });
+                        }),
+                        const SizedBox(height: 20),
+                        _zoomButton(Icons.add, () {
+                          mapController.animateCamera(CameraUpdate.zoomIn());
+                        }),
+                        const SizedBox(height: 20),
+                        _zoomButton(Icons.remove, () {
+                          mapController.animateCamera(CameraUpdate.zoomOut());
+                        }),
+                      ],
+                    ),
                   ),
-                  child: const Icon(Icons.search),
+                ),
+                // Input Fields & Show Route Button
+                SafeArea(
+                  child: Align(
+                    alignment: Alignment.topCenter,
+                    child: Padding(
+                      padding: const EdgeInsets.only(top: 10.0),
+                      child: _inputFields(width),
+                    ),
+                  ),
+                ),
+                // Current Location Button
+                SafeArea(
+                  child: Align(
+                    alignment: Alignment.bottomRight,
+                    child: Padding(
+                      padding: const EdgeInsets.only(right: 10.0, bottom: 10.0),
+                      child: _currentLocationButton(),
+                    ),
+                  ),
                 ),
               ],
             ),
+    );
+  }
+
+  Widget _zoomButton(IconData icon, VoidCallback onPressed) {
+    return ClipOval(
+      child: Material(
+        color: Colors.blue.shade100,
+        child: InkWell(
+          splashColor: Colors.blue,
+          onTap: onPressed,
+          child: SizedBox(
+            width: 50,
+            height: 50,
+            child: Icon(icon),
           ),
-        ],
+        ),
+      ),
+    );
+  }
+
+  Widget _trafficButton(IconData icon, VoidCallback onPressed) {
+    return ClipOval(
+      child: Material(
+        color: Colors.blue.shade100,
+        child: InkWell(
+          splashColor: Colors.blue,
+          onTap: onPressed,
+          child: SizedBox(
+            width: 50,
+            height: 50,
+            child: Icon(icon),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _inputFields(double width) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white70,
+        borderRadius: BorderRadius.all(Radius.circular(20.0)),
+      ),
+      width: width * 0.9,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 10.0, horizontal: 5.0),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            Text(
+              'Places',
+              style: TextStyle(fontSize: 20.0),
+            ),
+            SizedBox(height: 10),
+            _textField(
+              label: 'Start',
+              hint: 'Choose starting point',
+              prefixIcon: Icon(Icons.looks_one),
+              suffixIcon: IconButton(
+                icon: Icon(Icons.my_location),
+                onPressed: () {
+                  if (_currentAddress.isNotEmpty) {
+                    setState(() {
+                      startAddressController.text = _currentAddress;
+                      _startAddress = _currentAddress;
+                    });
+                  } else {
+                    _showSnackBar('Current location not available');
+                  }
+                },
+              ),
+              controller: startAddressController,
+              focusNode: startAddressFocusNode,
+              width: width,
+              locationCallback: (String value) {
+                setState(() {
+                  _startAddress = value;
+                });
+              },
+            ),
+            SizedBox(height: 10),
+            _textField(
+              label: 'Destination',
+              hint: 'Choose destination',
+              prefixIcon: Icon(Icons.looks_two),
+              controller: destinationAddressController,
+              focusNode: destinationAddressFocusNode,
+              width: width,
+              locationCallback: (String value) {
+                setState(() {
+                  _destinationAddress = value;
+                });
+              },
+            ),
+            SizedBox(height: 10),
+            Visibility(
+              visible: _placeDistance != null,
+              child: Text(
+                'DISTANCE: $_placeDistance km',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              ),
+            ),
+            SizedBox(height: 5),
+            ElevatedButton(
+              onPressed:
+                  (_startAddress.isNotEmpty && _destinationAddress.isNotEmpty)
+                      ? () async {
+                          startAddressFocusNode.unfocus();
+                          destinationAddressFocusNode.unfocus();
+                          setState(() {
+                            markers.clear();
+                            polylines.clear();
+                            polylineCoordinates.clear();
+                            _placeDistance = null;
+                          });
+
+                          bool isCalculated = await _calculateDistance();
+                          if (isCalculated) {
+                            _showSnackBar('Distance Calculated Successfully');
+                          } else {
+                            _showSnackBar('Error Calculating Distance');
+                          }
+                        }
+                      : null,
+              style: ElevatedButton.styleFrom(
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(20.0)),
+                backgroundColor: Color(0xff6c5270),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.all(8.0),
+                child: Text(
+                  'Show Route'.toUpperCase(),
+                  style: TextStyle(color: Colors.white, fontSize: 20.0),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _currentLocationButton() {
+    return ClipOval(
+      child: Material(
+        color: Colors.orange.shade100,
+        child: InkWell(
+          splashColor: Colors.orange,
+          child: SizedBox(
+            width: 56,
+            height: 56,
+            child: Icon(Icons.my_location),
+          ),
+          onTap: () {
+            if (_currentPosition != null) {
+              mapController.animateCamera(
+                CameraUpdate.newCameraPosition(
+                  CameraPosition(
+                    target: LatLng(_currentPosition!.latitude,
+                        _currentPosition!.longitude),
+                    zoom: 18.0,
+                  ),
+                ),
+              );
+            } else {
+              _showSnackBar('Current location not available');
+            }
+          },
+        ),
       ),
     );
   }
