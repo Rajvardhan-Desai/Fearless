@@ -8,6 +8,7 @@ import 'package:fearless/screens/signup_screen.dart';
 import 'package:fearless/screens/signin_screen.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
+import 'package:flutter/services.dart';
 
 import 'firebase_options.dart';
 
@@ -19,6 +20,9 @@ final authStateProvider = StreamProvider<User?>((ref) {
   final auth = ref.watch(firebaseAuthProvider);
   return auth.authStateChanges();
 });
+
+// Create a global navigator key
+final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -36,15 +40,51 @@ void main() async {
   runApp(const ProviderScope(child: MyApp()));
 }
 
-class MyApp extends ConsumerWidget {
+class MyApp extends ConsumerStatefulWidget {
   const MyApp({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  MyAppState createState() => MyAppState();
+}
+
+class MyAppState extends ConsumerState<MyApp> {
+  static const MethodChannel _sharingChannel = MethodChannel('com.fearless.app/sharing');
+
+  @override
+  void initState() {
+    super.initState();
+
+    // Set up the method call handler
+    _sharingChannel.setMethodCallHandler(_handleMethodCall);
+  }
+
+  Future<void> _handleMethodCall(MethodCall call) async {
+    if (call.method == 'emergencySharingTriggered') {
+      // Handle the emergency sharing action
+      // Since we might not have a BuildContext, use navigatorKey
+      _triggerEmergencySharing();
+    }
+  }
+
+  void _triggerEmergencySharing() {
+    // Use the navigator key to navigate
+    navigatorKey.currentState?.push(
+      MaterialPageRoute(
+        builder: (context) => const HomeScreen(
+          initialIndex: 0, // Ensure we navigate to the Home tab
+          triggerEmergencySharing: true, // Pass a flag to trigger sharing
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final authState = ref.watch(authStateProvider);
 
     return MaterialApp(
       title: 'Fearless',
+      navigatorKey: navigatorKey, // Set the navigator key
       theme: ThemeData(
         textTheme: GoogleFonts.plusJakartaSansTextTheme(
           Theme.of(context).textTheme,
@@ -57,7 +97,7 @@ class MyApp extends ConsumerWidget {
           if (user == null) {
             return const SignInScreen();
           } else {
-            return const HomeScreen();
+            return const HomeScreen(triggerEmergencySharing: true,);
           }
         },
         loading: () => const Scaffold(
@@ -82,7 +122,7 @@ class MyApp extends ConsumerWidget {
       ],
       routes: {
         'SignInScreen': (context) => const SignInScreen(),
-        'HomeScreen': (context) => const HomeScreen(),
+        'HomeScreen': (context) => const HomeScreen(triggerEmergencySharing: false),
         'SignUpScreen': (context) => const SignUpScreen(),
       },
     );

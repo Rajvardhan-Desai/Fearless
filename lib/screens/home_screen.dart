@@ -1,8 +1,10 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:fearless/screens/profile_page.dart';
 import 'package:fearless/screens/search_page.dart';
+import 'package:fearless/screens/shake_service_controller.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
@@ -14,22 +16,29 @@ import '../providers/user_provider.dart';
 import 'emergency_sharing_screen.dart';
 import 'news_screen.dart';
 
+import 'package:device_info_plus/device_info_plus.dart';
+import 'package:android_intent_plus/android_intent.dart';
+
 class HomeScreen extends ConsumerStatefulWidget {
   final int initialIndex;
+  final bool triggerEmergencySharing;
 
-  const HomeScreen({super.key, this.initialIndex = 0});
+  const HomeScreen({super.key, this.initialIndex = 0, this.triggerEmergencySharing = false});
 
   @override
   HomeScreenState createState() => HomeScreenState();
 }
 
-class HomeScreenState extends ConsumerState<HomeScreen> {
+class HomeScreenState extends ConsumerState<HomeScreen> with WidgetsBindingObserver{
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey();
   final TextEditingController _reasonController = TextEditingController();
   late int _selectedIndex;
   final _auth = FirebaseAuth.instance;
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   bool _isLoading = true;
+
+  static const MethodChannel _powerButtonChannel = MethodChannel('com.fearless.app/powerbutton');
+  static const MethodChannel _sharingChannel = MethodChannel('com.fearless.app/sharing');
 
   final TwilioFlutter twilioFlutter = TwilioFlutter(
     accountSid: dotenv.env['TWILIO_ACCOUNT_SID']!,
@@ -44,6 +53,24 @@ class HomeScreenState extends ConsumerState<HomeScreen> {
 
     final userNotifier = ref.read(userProvider.notifier);
 
+
+    if (widget.triggerEmergencySharing) {
+      _startPowerButtonService();
+      _sharingChannel.setMethodCallHandler(_handleMethodCall);
+
+      // Delay the bottom sheet display to allow the screen to build
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _showEmergencySharingBottomSheet();
+      });
+    }
+
+    WidgetsBinding.instance.addObserver(this);
+    ShakeServiceController.listenForEmergencySharing(() {
+      _showEmergencySharingBottomSheet();
+    });
+    // Optionally start the service automatically
+    // ShakeServiceController.startService();
+
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       try {
         await userNotifier.fetchUserData();
@@ -57,6 +84,38 @@ class HomeScreenState extends ConsumerState<HomeScreen> {
     });
   }
 
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    ShakeServiceController.stopService(); // Stop the service when app is closed
+    _stopPowerButtonService();
+    super.dispose();
+  }
+
+  Future<void> _startPowerButtonService() async {
+    try {
+      await _powerButtonChannel.invokeMethod('startPowerButtonService');
+    } on PlatformException catch (e) {
+      debugPrint("Failed to start power button service: ${e.message}");
+    }
+  }
+
+
+  Future<void> _stopPowerButtonService() async {
+    try {
+      await _powerButtonChannel.invokeMethod('stopPowerButtonService');
+    } on PlatformException catch (e) {
+      debugPrint("Failed to stop power button service: ${e.message}");
+    }
+  }
+
+  Future<void> _handleMethodCall(MethodCall call) async {
+    if (call.method == 'emergencySharingTriggered') {
+      // Perform the same action as pressing the share button
+      _showEmergencySharingBottomSheet();
+    }
+  }
+
   void _showErrorSnackBar(String message) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -65,6 +124,27 @@ class HomeScreenState extends ConsumerState<HomeScreen> {
       ),
     );
   }
+
+
+
+  Future<void> _checkBatteryOptimization() async {
+    DeviceInfoPlugin deviceInfo = DeviceInfoPlugin();
+    AndroidDeviceInfo androidInfo = await deviceInfo.androidInfo;
+    if (androidInfo.version.sdkInt >= 23) {
+      const platform = MethodChannel('com.fearless.app/powerbutton');
+      bool isIgnoring = await platform.invokeMethod('isIgnoringBatteryOptimizations');
+      if (!isIgnoring) {
+        // Show dialog to ask user to disable battery optimization
+        // Provide a button to open settings
+        AndroidIntent intent = AndroidIntent(
+          action: 'android.settings.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS',
+          data: 'package:com.fearless.app',
+        );
+        await intent.launch();
+      }
+    }
+  }
+
 
   void _onItemTapped(int index) {
     setState(() {

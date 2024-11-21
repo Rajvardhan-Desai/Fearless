@@ -55,7 +55,7 @@ class SignInScreenState extends State<SignInScreen> {
   void _navigateToHome() {
     Navigator.pushAndRemoveUntil(
       context,
-      MaterialPageRoute(builder: (context) => const HomeScreen()),
+      MaterialPageRoute(builder: (context) => const HomeScreen(triggerEmergencySharing: false,)),
           (Route<dynamic> route) => false,
     );
   }

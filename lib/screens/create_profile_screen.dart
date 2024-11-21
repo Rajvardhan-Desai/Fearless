@@ -335,7 +335,7 @@ class CreateProfileScreenState extends State<CreateProfileScreen> {
         if (mounted) {
           Navigator.pushAndRemoveUntil(
             context,
-            MaterialPageRoute(builder: (context) => const HomeScreen()),
+            MaterialPageRoute(builder: (context) => const HomeScreen(triggerEmergencySharing: false)),
             (Route<dynamic> route) => false,
           );
         }

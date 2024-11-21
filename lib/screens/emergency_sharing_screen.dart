@@ -294,7 +294,7 @@ class EmergencySharingScreenState
                     // Navigate to home screen
                     Navigator.pushAndRemoveUntil(
                       context,
-                      MaterialPageRoute(builder: (context) => const HomeScreen()),
+                      MaterialPageRoute(builder: (context) => const HomeScreen(triggerEmergencySharing: false)),
                           (route) => false,
                     );
                   },
