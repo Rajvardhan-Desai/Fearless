@@ -11,6 +11,7 @@ import 'package:http/http.dart' as http;
 import 'dart:async';
 
 import 'package:google_maps_webservice/places.dart' as gmw;
+import 'package:flutter/services.dart' show rootBundle;
 
 class SearchPage extends StatefulWidget {
   const SearchPage({super.key});
@@ -19,40 +20,43 @@ class SearchPage extends StatefulWidget {
   SearchPageState createState() => SearchPageState();
 }
 
+class SafetyDataPoint {
+  final double latitude;
+  final double longitude;
+  final double safetyScore;
+
+  SafetyDataPoint({
+    required this.latitude,
+    required this.longitude,
+    required this.safetyScore,
+  });
+}
+
 class SearchPageState extends State<SearchPage> {
   CameraPosition _initialLocation = const CameraPosition(
     target: LatLng(18.516726, 73.856255),
     zoom: 12.0,
-  ); // Example: San Francisco
+  ); // Pune coordinates
   late GoogleMapController mapController;
   bool _isTrafficEnabled = true;
 
+  // Heatmap variables
+  Set<Circle> _heatmapCircles = {};
+  bool _isHeatmapVisible = false;
+
   late gmw.GoogleMapsPlaces places;
+  // Safety data list
+  List<SafetyDataPoint> safetyData = [];
 
-  Future<List<gmw.Prediction>> _fetchPlaceSuggestions(String input) async {
-    if (input.isEmpty) return [];
-    try {
-      final response = await places.autocomplete(input);
-      if (response.isOkay) {
-        return response.predictions;
-      } else {
-        print("Error fetching place suggestions: ${response.errorMessage}");
-        _showSnackBar('Error fetching suggestions: ${response.errorMessage}');
-        return [];
-      }
-    } catch (e) {
-      print("Exception fetching suggestions: $e");
-      _showSnackBar('Exception: $e');
-      return [];
-    }
-  }
-
+  // Position and Address variables
   Position? _currentPosition;
   String _currentAddress = '';
 
+  // Text Controllers
   final startAddressController = TextEditingController();
   final destinationAddressController = TextEditingController();
 
+  // Focus Nodes
   final startAddressFocusNode = FocusNode();
   final destinationAddressFocusNode = FocusNode();
 
@@ -77,6 +81,74 @@ class SearchPageState extends State<SearchPage> {
     _checkPermissions();
     polylinePoints = PolylinePoints();
     places = gmw.GoogleMapsPlaces(apiKey: dotenv.env['GOOGLE_MAPS_API_KEY']!);
+
+    // Load safety data
+    loadSafetyData();
+    _isHeatmapVisible = true;
+  }
+
+  Future<void> loadSafetyData() async {
+    try {
+      final String response =
+          await rootBundle.loadString('assets/safety_data_pune.json');
+      final data = json.decode(response);
+      safetyData = data.map<SafetyDataPoint>((item) {
+        return SafetyDataPoint(
+          latitude: item['Latitude'],
+          longitude: item['Longitude'],
+          safetyScore: item['Safety_Score'],
+        );
+      }).toList();
+
+      print("Loaded ${safetyData.length} safety data points.");
+
+      _prepareHeatmapCircles();
+    } catch (e) {
+      print("Error loading safety data: $e");
+      _showSnackBar('Error loading safety data: $e');
+    }
+  }
+
+  Future<List<gmw.Prediction>> _fetchPlaceSuggestions(String input) async {
+    if (input.isEmpty) return [];
+    try {
+      final response = await places.autocomplete(input);
+      if (response.isOkay) {
+        return response.predictions;
+      } else {
+        print("Error fetching place suggestions: ${response.errorMessage}");
+        _showSnackBar('Error fetching suggestions: ${response.errorMessage}');
+        return [];
+      }
+    } catch (e) {
+      print("Exception fetching suggestions: $e");
+      _showSnackBar('Exception: $e');
+      return [];
+    }
+  }
+
+  void _prepareHeatmapCircles() {
+    Set<Circle> circles = safetyData.map((dataPoint) {
+      double intensity =
+          (1 - dataPoint.safetyScore); // Invert safety score for intensity
+
+      // Map intensity to a color from green (safe) to red (unsafe)
+      Color circleColor =
+          Color.lerp(Colors.green, Colors.red, intensity)!.withOpacity(0.5);
+
+      return Circle(
+        circleId:
+            CircleId('circle_${dataPoint.latitude}_${dataPoint.longitude}'),
+        center: LatLng(dataPoint.latitude, dataPoint.longitude),
+        radius: 300, // Radius in meters; adjust as needed
+        fillColor: circleColor,
+        strokeColor: Colors.transparent,
+      );
+    }).toSet();
+
+    setState(() {
+      _heatmapCircles = circles;
+    });
   }
 
   Future<void> _checkPermissions() async {
@@ -283,12 +355,13 @@ class SearchPageState extends State<SearchPage> {
   }
 
   Future<void> _createPolylines(
-      double startLatitude,
-      double startLongitude,
-      double destinationLatitude,
-      double destinationLongitude,
-      ) async {
-    final String baseUrl = 'https://maps.googleapis.com/maps/api/directions/json';
+    double startLatitude,
+    double startLongitude,
+    double destinationLatitude,
+    double destinationLongitude,
+  ) async {
+    final String baseUrl =
+        'https://maps.googleapis.com/maps/api/directions/json';
     final String origin = '$startLatitude,$startLongitude';
     final String destination = '$destinationLatitude,$destinationLongitude';
 
@@ -308,26 +381,62 @@ class SearchPageState extends State<SearchPage> {
             polylines.clear();
 
             int routeIndex = 0;
+            double highestSafetyScore = -1;
+            int safestRouteIndex = 0;
 
             for (var route in data['routes']) {
               String encodedPolyline = route['overview_polyline']['points'];
               List<LatLng> polylineCoords = _decodePolyline(encodedPolyline);
 
-              if (routeIndex == 0) {
-                polylineCoordinates = polylineCoords; // Set default route coordinates
+              // Check if the route is within Pune
+              if (!isRouteWithinPune(polylineCoords)) {
+                continue; // Skip routes outside Pune
               }
 
+              // Calculate safety score for this route
+              double routeSafetyScore = _calculateRouteSafetyScore(polylineCoords);
+
+              if (routeSafetyScore > highestSafetyScore) {
+                highestSafetyScore = routeSafetyScore;
+                safestRouteIndex = routeIndex;
+              }
+
+              // ... Store polylines ..
               PolylineId polylineId = PolylineId('route_$routeIndex');
               polylines[polylineId] = Polyline(
                 polylineId: polylineId,
-                color: routeIndex == 0 ? Colors.blue : Colors.grey,
+                color: Colors.grey, // Default color for other routes
                 points: polylineCoords,
-                width: 5,
+                width: 4,
+                zIndex: 1, // Lower zIndex for regular routes
                 onTap: () => _onRouteTapped(routeIndex, polylineCoords),
               );
 
               routeIndex++;
             }
+
+            if (polylines.isEmpty) {
+              _showSnackBar('No routes available within Pune.');
+              return;
+            }
+
+            // Highlight the safest route
+            PolylineId safestPolylineId = PolylineId('route_$safestRouteIndex');
+            polylines[safestPolylineId] = polylines[safestPolylineId]!.copyWith(
+              colorParam: Colors.blue,
+              widthParam: 6,
+              zIndexParam: 2,
+            );
+
+            // Update polylineCoordinates to the safest route
+            polylineCoordinates = polylines[safestPolylineId]!.points;
+
+            // Update distance and safety score display
+            double totalDistance = _calculateRouteDistance(polylineCoordinates);
+            _placeDistance = totalDistance.toStringAsFixed(2); // Update distance
+            double safetyScore = highestSafetyScore;
+            _showSnackBar(
+                'Safest Route: $_placeDistance km, Safety Score: ${safetyScore.toStringAsFixed(2)}');
           });
         } else {
           _showSnackBar('Error: ${data['error_message']}');
@@ -340,27 +449,110 @@ class SearchPageState extends State<SearchPage> {
     }
   }
 
+  double _calculateRouteSafetyScore(List<LatLng> route) {
+    double totalSafetyScore = 0.0;
+    double totalDistance = 0.0;
+
+    // Calculate the default safety score (average of all safety data points)
+    double defaultSafetyScore = safetyData
+        .map((dataPoint) => dataPoint.safetyScore)
+        .reduce((a, b) => a + b) /
+        safetyData.length;
+
+    for (int i = 0; i < route.length - 1; i++) {
+      LatLng start = route[i];
+      LatLng end = route[i + 1];
+
+      // Calculate the distance of the segment
+      double segmentDistance = Geolocator.distanceBetween(
+        start.latitude,
+        start.longitude,
+        end.latitude,
+        end.longitude,
+      );
+
+      // Calculate the midpoint of the segment
+      double midLatitude = (start.latitude + end.latitude) / 2;
+      double midLongitude = (start.longitude + end.longitude) / 2;
+
+      // Find nearby safety data points within a certain radius (e.g., 500 meters)
+      List<SafetyDataPoint> nearbySafetyData = safetyData.where((dataPoint) {
+        double distance = Geolocator.distanceBetween(
+          midLatitude,
+          midLongitude,
+          dataPoint.latitude,
+          dataPoint.longitude,
+        );
+        return distance <= 500; // Radius in meters
+      }).toList();
+
+      double segmentSafetyScore;
+
+      if (nearbySafetyData.isNotEmpty) {
+        // Calculate the average safety score of nearby points
+        segmentSafetyScore = nearbySafetyData
+            .map((dataPoint) => dataPoint.safetyScore)
+            .reduce((a, b) => a + b) /
+            nearbySafetyData.length;
+      } else {
+        // Assign the default safety score if no nearby data points are found
+        segmentSafetyScore = defaultSafetyScore;
+      }
+
+      // Weight the segment safety score by the segment distance
+      totalSafetyScore += segmentSafetyScore * segmentDistance;
+      totalDistance += segmentDistance;
+    }
+
+    // Return the average safety score per unit distance
+    return totalDistance > 0 ? totalSafetyScore / totalDistance : defaultSafetyScore;
+  }
+
+  bool isRouteWithinPune(List<LatLng> route) {
+    // Define approximate boundaries of Pune
+    int pointsWithinPune = 0;
+    double minLat = 18.40;
+    double maxLat = 18.70;
+    double minLng = 73.70;
+    double maxLng = 74.10;
+
+    for (LatLng point in route) {
+      if (point.latitude >= minLat &&
+          point.latitude <= maxLat &&
+          point.longitude >= minLng &&
+          point.longitude <= maxLng) {
+        pointsWithinPune++;
+      }
+    }
+
+    // Allow routes that are at least 90% within Pune
+    return (pointsWithinPune / route.length) >= 0.9;
+  }
+
   void _onRouteTapped(int routeIndex, List<LatLng> selectedRoute) {
     setState(() {
       polylines.forEach((id, polyline) {
         polylines[id] = polyline.copyWith(
-          colorParam: id.value == 'route_$routeIndex' ? Colors.blue : Colors.grey,
+          colorParam:
+              id.value == 'route_$routeIndex' ? Colors.blue : Colors.grey,
           widthParam: id.value == 'route_$routeIndex' ? 6 : 4,
         );
       });
 
-      // Calculate and display the distance for the selected route
+      // Update the displayed distance and safety score
       double totalDistance = _calculateRouteDistance(selectedRoute);
-      _placeDistance = totalDistance.toStringAsFixed(2); // Update distance
+      _placeDistance = totalDistance.toStringAsFixed(2);
+
+      double safetyScore = _calculateRouteSafetyScore(selectedRoute);
+
+      _showSnackBar(
+          'Selected Route: $_placeDistance km, Safety Score: ${safetyScore.toStringAsFixed(2)}');
     });
 
-    // Fit the camera to the selected route
+    // Adjust the camera to the selected route
     LatLngBounds bounds = _getLatLngBounds(selectedRoute);
     mapController.animateCamera(CameraUpdate.newLatLngBounds(bounds, 100));
-
-    _showSnackBar('Selected Route: $_placeDistance km');
   }
-
 
   LatLngBounds _getLatLngBounds(List<LatLng> points) {
     double south = points.map((e) => e.latitude).reduce(min);
@@ -374,7 +566,6 @@ class SearchPageState extends State<SearchPage> {
     );
   }
 
-
   double _calculateRouteDistance(List<LatLng> route) {
     double totalDistance = 0.0;
     for (int i = 0; i < route.length - 1; i++) {
@@ -387,9 +578,6 @@ class SearchPageState extends State<SearchPage> {
     }
     return totalDistance / 1000; // Return distance in kilometers
   }
-
-
-
 
   List<LatLng> _decodePolyline(String encoded) {
     List<LatLng> polyline = [];
@@ -422,10 +610,6 @@ class SearchPageState extends State<SearchPage> {
 
     return polyline;
   }
-
-
-
-
 
   Widget _textField({
     required TextEditingController controller,
@@ -574,7 +758,7 @@ class SearchPageState extends State<SearchPage> {
     return Scaffold(
       key: _scaffoldKey,
       body: _isLoading
-          ? Center(child: CircularProgressIndicator())
+          ? const Center(child: CircularProgressIndicator())
           : Stack(
               children: <Widget>[
                 // Map View
@@ -584,6 +768,7 @@ class SearchPageState extends State<SearchPage> {
                   myLocationEnabled: true,
                   myLocationButtonEnabled: false,
                   mapType: MapType.normal,
+                  circles: _isHeatmapVisible ? _heatmapCircles : Set<Circle>(),
                   trafficEnabled:
                       _isTrafficEnabled, // Add this line for traffic overlay
                   zoomGesturesEnabled: true,
@@ -606,6 +791,12 @@ class SearchPageState extends State<SearchPage> {
                         _trafficButton(Icons.traffic_outlined, () {
                           setState(() {
                             _isTrafficEnabled = !_isTrafficEnabled;
+                          });
+                        }),
+                        const SizedBox(height: 20),
+                        _heatmapButton(Icons.wb_sunny, () {
+                          setState(() {
+                            _isHeatmapVisible = !_isHeatmapVisible;
                           });
                         }),
                         const SizedBox(height: 20),
@@ -646,6 +837,23 @@ class SearchPageState extends State<SearchPage> {
   }
 
   Widget _zoomButton(IconData icon, VoidCallback onPressed) {
+    return ClipOval(
+      child: Material(
+        color: Colors.blue.shade100,
+        child: InkWell(
+          splashColor: Colors.blue,
+          onTap: onPressed,
+          child: SizedBox(
+            width: 50,
+            height: 50,
+            child: Icon(icon),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _heatmapButton(IconData icon, VoidCallback onPressed) {
     return ClipOval(
       child: Material(
         color: Colors.blue.shade100,
@@ -746,38 +954,39 @@ class SearchPageState extends State<SearchPage> {
             ),
             SizedBox(height: 5),
             ElevatedButton(
-              onPressed: (_startAddress.isNotEmpty && _destinationAddress.isNotEmpty)
-                  ? () async {
-                startAddressFocusNode.unfocus();
-                destinationAddressFocusNode.unfocus();
-                setState(() {
-                  markers.clear();
-                  polylines.clear();
-                  polylineCoordinates.clear();
-                  _placeDistance = null;
-                });
+              onPressed:
+                  (_startAddress.isNotEmpty && _destinationAddress.isNotEmpty)
+                      ? () async {
+                          startAddressFocusNode.unfocus();
+                          destinationAddressFocusNode.unfocus();
+                          setState(() {
+                            markers.clear();
+                            polylines.clear();
+                            polylineCoordinates.clear();
+                            _placeDistance = null;
+                          });
 
-                bool isCalculated = await _calculateDistance();
-                if (isCalculated) {
-                  _showSnackBar('Distance Calculated Successfully');
-                } else {
-                  _showSnackBar('Error Calculating Distance');
-                }
-              }
-                  : null,
+                          bool isCalculated = await _calculateDistance();
+                          if (isCalculated) {
+                            _showSnackBar('Distance Calculated Successfully');
+                          } else {
+                            _showSnackBar('Error Calculating Distance');
+                          }
+                        }
+                      : null,
               style: ElevatedButton.styleFrom(
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20.0)),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(20.0)),
                 backgroundColor: Color(0xff6c5270),
               ),
               child: Padding(
                 padding: const EdgeInsets.all(8.0),
                 child: Text(
-                  'Show Route'.toUpperCase(),
+                  'Show Safest Route'.toUpperCase(),
                   style: TextStyle(color: Colors.white, fontSize: 20.0),
                 ),
               ),
             ),
-
           ],
         ),
       ),
