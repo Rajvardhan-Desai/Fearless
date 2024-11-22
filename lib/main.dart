@@ -84,6 +84,7 @@ class MyAppState extends ConsumerState<MyApp> {
 
     return MaterialApp(
       title: 'Fearless',
+      debugShowCheckedModeBanner: false,
       navigatorKey: navigatorKey, // Set the navigator key
       theme: ThemeData(
         textTheme: GoogleFonts.plusJakartaSansTextTheme(

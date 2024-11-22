@@ -37,8 +37,11 @@ class SearchPageState extends State<SearchPage> {
     target: LatLng(18.516726, 73.856255),
     zoom: 12.0,
   ); // Pune coordinates
+
   late GoogleMapController mapController;
   bool _isTrafficEnabled = true;
+
+  late double? _safetyScore = 0;
 
   // Heatmap variables
   Set<Circle> _heatmapCircles = {};
@@ -433,10 +436,15 @@ class SearchPageState extends State<SearchPage> {
 
             // Update distance and safety score display
             double totalDistance = _calculateRouteDistance(polylineCoordinates);
-            _placeDistance = totalDistance.toStringAsFixed(2); // Update distance
+            _placeDistance = totalDistance.toStringAsFixed(2); // Update distancDe
             double safetyScore = highestSafetyScore;
+
+            setState(() {
+              _safetyScore = highestSafetyScore; // Update safety score
+            });
+
             _showSnackBar(
-                'Safest Route: $_placeDistance km, Safety Score: ${safetyScore.toStringAsFixed(2)}');
+                'Safest Route: $_placeDistance km, Safety Score: Safety Score: ${(1 + (_safetyScore! * 9)).toStringAsFixed(1)} / 10');
           });
         } else {
           _showSnackBar('Error: ${data['error_message']}');
@@ -546,7 +554,7 @@ class SearchPageState extends State<SearchPage> {
       double safetyScore = _calculateRouteSafetyScore(selectedRoute);
 
       _showSnackBar(
-          'Selected Route: $_placeDistance km, Safety Score: ${safetyScore.toStringAsFixed(2)}');
+          'Selected Route: $_placeDistance km, Safety Score: ${(1 + (_safetyScore! * 9)).toStringAsFixed(1)} / 10');
     });
 
     // Adjust the camera to the selected route
@@ -899,11 +907,7 @@ class SearchPageState extends State<SearchPage> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: <Widget>[
-            Text(
-              'Places',
-              style: TextStyle(fontSize: 20.0),
-            ),
-            SizedBox(height: 10),
+            const SizedBox(height: 10),
             _textField(
               label: 'Start',
               hint: 'Choose starting point',
@@ -946,9 +950,9 @@ class SearchPageState extends State<SearchPage> {
             ),
             SizedBox(height: 10),
             Visibility(
-              visible: _placeDistance != null,
+              visible: _placeDistance != null && _safetyScore != null,
               child: Text(
-                'DISTANCE: $_placeDistance km',
+                'DISTANCE: $_placeDistance km\nSafety Score: ${(1 + (_safetyScore! * 9)).toStringAsFixed(1)} / 10',
                 style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
               ),
             ),
