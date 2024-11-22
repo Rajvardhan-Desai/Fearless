@@ -104,7 +104,7 @@ class EmergencySharingScreenState
 
       setState(() {
         _liveLocationLink =
-            'https://www.google.com/maps?q=${position.latitude},${position.longitude}';
+        'https://www.google.com/maps?q=${position.latitude},${position.longitude}';
       });
     } catch (e) {
       setState(() {
@@ -308,29 +308,29 @@ class EmergencySharingScreenState
                 ElevatedButton(
                   onPressed: isDoneEnabled
                       ? () {
-                          // Stop sharing and notify contacts with a reason
-                          sendEmergencySMSInBackground(
-                            message:
-                                '\n${userState.name} has stopped sharing their location.',
-                            contacts: widget.selectedContacts
-                                .map((c) => c['phone']!)
-                                .toList(),
-                            reason: reason,
-                          );
+                    // Stop sharing and notify contacts with a reason
+                    sendEmergencySMSInBackground(
+                      message:
+                      '\n${userState.name} has stopped sharing their location.',
+                      contacts: widget.selectedContacts
+                          .map((c) => c['phone']!)
+                          .toList(),
+                      reason: reason,
+                    );
 
-                          Navigator.pushAndRemoveUntil(
-                            context,
-                            MaterialPageRoute(
-                                builder: (context) => const HomeScreen(
-                                    triggerEmergencySharing: false)),
-                            (route) => false,
-                          );
+                    Navigator.pushAndRemoveUntil(
+                      context,
+                      MaterialPageRoute(
+                          builder: (context) => const HomeScreen(
+                              triggerEmergencySharing: false)),
+                          (route) => false,
+                    );
 
-                          // Navigate to home screen
-                          //   Navigator.pushNamedAndRemoveUntil(
-                          //       context, '/home', (route) => false);
-                          //
-                        }
+                    // Navigate to home screen
+                    //   Navigator.pushNamedAndRemoveUntil(
+                    //       context, '/home', (route) => false);
+                    //
+                  }
                       : null,
                   child: const Text(
                     'Done',
@@ -469,7 +469,7 @@ class EmergencySharingScreenState
       String message =
           '\nEmergency alert!\n${userState.name} is contacting you as an emergency contact.';
       List<String> contacts =
-          widget.selectedContacts.map((c) => c['phone']!).toList();
+      widget.selectedContacts.map((c) => c['phone']!).toList();
       sendEmergencySMSInBackground(
           message: message, contacts: contacts, reason: widget.reason);
     }
@@ -480,7 +480,7 @@ class EmergencySharingScreenState
       String message =
           '\nEmergency alert!\n${userState.name} is calling emergency services.';
       List<String> contacts =
-          widget.selectedContacts.map((c) => c['phone']!).toList();
+      widget.selectedContacts.map((c) => c['phone']!).toList();
       sendEmergencySMSInBackground(
           message: message, contacts: contacts, reason: widget.reason);
 
@@ -495,7 +495,7 @@ class EmergencySharingScreenState
       String message =
           "\nAlert: ${userState.name}'s phone battery is below 15%.";
       List<String> contacts =
-          widget.selectedContacts.map((c) => c['phone']!).toList();
+      widget.selectedContacts.map((c) => c['phone']!).toList();
       sendEmergencySMSInBackground(message: message, contacts: contacts);
     }
   }
@@ -570,7 +570,7 @@ class EmergencySharingScreenState
                       CircleAvatar(
                         radius: 20,
                         backgroundColor:
-                            const Color(0xFFFF80AB), // Pink avatar color
+                        const Color(0xFFFF80AB), // Pink avatar color
                         child: Text(
                           contact['name']!.substring(0, 1).toUpperCase(),
                           style: const TextStyle(
@@ -632,9 +632,9 @@ class EmergencySharingScreenState
                   icon: const Icon(Icons.open_in_new, color: Colors.blueAccent),
                   onPressed: _liveLocationLink != null
                       ? () {
-                          // Open Google Maps link
-                          launchUrl(Uri.parse(_liveLocationLink!));
-                        }
+                    // Open Google Maps link
+                    launchUrl(Uri.parse(_liveLocationLink!));
+                  }
                       : null,
                 ),
               ],
@@ -666,10 +666,10 @@ class EmergencySharingScreenState
                     backgroundColor: const Color(0xFFFF2D3A), // Red color
                     shape: RoundedRectangleBorder(
                       borderRadius:
-                          BorderRadius.circular(30), // Rounded corners
+                      BorderRadius.circular(30), // Rounded corners
                     ),
                     minimumSize:
-                        const Size(150, 60), // Size for consistent button look
+                    const Size(150, 60), // Size for consistent button look
                     elevation: 2, // Slight elevation for the button
                   ),
                   child: const Row(
@@ -700,7 +700,7 @@ class EmergencySharingScreenState
                     side: const BorderSide(color: Colors.white), // White border
                     shape: RoundedRectangleBorder(
                       borderRadius:
-                          BorderRadius.circular(50), // Rounded corners
+                      BorderRadius.circular(50), // Rounded corners
                     ),
                     minimumSize: const Size(150, 60), // Consistent button size
                     foregroundColor: Colors.white, // Text/Icon color
