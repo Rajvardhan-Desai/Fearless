@@ -24,8 +24,12 @@ class _NewsPageState extends State<NewsPage> {
     if (apiKey.isEmpty) {
       _showSnackBar('API key is missing. Please check your configuration.');
     } else {
+      // apiUrl =
+      // "https://serpapi.com/search.json?q=(pune&traffic+OR+crime+against+women)&tbm=nws&gl=IN&hl=en&tbs=qdr:w&api_key=$apiKey";
+
       apiUrl =
-      "https://serpapi.com/search.json?q=(pune&traffic+OR+crime+against+women)&tbm=nws&gl=IN&hl=en&tbs=qdr:w&api_key=$apiKey";
+      "https://serpapi.com/search.json?q=(pune+traffic)&tbm=nws&gl=IN&hl=en&tbs=qdr:w&api_key=$apiKey";
+
       fetchNews();
     }
   }
