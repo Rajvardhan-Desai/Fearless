@@ -304,7 +304,7 @@ class EditProfileScreenState extends ConsumerState<EditProfileScreen> {
       appBar: AppBar(
         title: const Text('Edit Profile',
             style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-        backgroundColor: const Color(0xff986ae7),
+        backgroundColor: const Color(0xff6c5270),
         iconTheme: const IconThemeData(
             color: Colors.white), // Set the back arrow color to white
       ),
@@ -365,32 +365,32 @@ class EditProfileScreenState extends ConsumerState<EditProfileScreen> {
                             },
                           ),
                           const SizedBox(height: 16.0),
-                          CustomTextFormField(
-                            controller: _emergencyContact1Controller,
-                            labelText: 'Emergency Contact 1',
-                            keyboardType: TextInputType.phone,
-                            validator: (value) {
-                              final phoneRegex = RegExp(r'^\+?\d{10,15}$');
-                              if (!phoneRegex.hasMatch(value!)) {
-                                return 'Please enter a valid phone number';
-                              }
-                              return null;
-                            },
-                          ),
-                          const SizedBox(height: 16.0),
-                          CustomTextFormField(
-                            controller: _emergencyContact2Controller,
-                            labelText: 'Emergency Contact 2',
-                            keyboardType: TextInputType.phone,
-                            validator: (value) {
-                              final phoneRegex = RegExp(r'^\+?\d{10,15}$');
-                              if (!phoneRegex.hasMatch(value!)) {
-                                return 'Please enter a valid phone number';
-                              }
-                              return null;
-                            },
-                          ),
-                          const SizedBox(height: 16.0),
+                          // CustomTextFormField(
+                          //   controller: _emergencyContact1Controller,
+                          //   labelText: 'Emergency Contact 1',
+                          //   keyboardType: TextInputType.phone,
+                          //   validator: (value) {
+                          //     final phoneRegex = RegExp(r'^\+?\d{10,15}$');
+                          //     if (!phoneRegex.hasMatch(value!)) {
+                          //       return 'Please enter a valid phone number';
+                          //     }
+                          //     return null;
+                          //   },
+                          // ),
+                          // const SizedBox(height: 16.0),
+                          // CustomTextFormField(
+                          //   controller: _emergencyContact2Controller,
+                          //   labelText: 'Emergency Contact 2',
+                          //   keyboardType: TextInputType.phone,
+                          //   validator: (value) {
+                          //     final phoneRegex = RegExp(r'^\+?\d{10,15}$');
+                          //     if (!phoneRegex.hasMatch(value!)) {
+                          //       return 'Please enter a valid phone number';
+                          //     }
+                          //     return null;
+                          //   },
+                          // ),
+                          // const SizedBox(height: 16.0),
                           CustomTextFormField(
                             controller: _guardianNameController,
                             labelText: 'Guardian Name',
@@ -422,7 +422,7 @@ class EditProfileScreenState extends ConsumerState<EditProfileScreen> {
                               : ElevatedButton(
                                   onPressed: _isChanged ? _updateProfile : null,
                                   style: ElevatedButton.styleFrom(
-                                    backgroundColor: Colors.deepPurple,
+                                    backgroundColor: Color(0xff725678),
                                     shape: RoundedRectangleBorder(
                                       borderRadius: BorderRadius.circular(10.0),
                                     ),

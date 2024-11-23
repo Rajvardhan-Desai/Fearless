@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:fearless/screens/profile_page.dart';
 import 'package:fearless/screens/search_page.dart';
@@ -9,12 +11,15 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:shimmer/shimmer.dart';
 import 'package:twilio_flutter/twilio_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../providers/user_provider.dart';
 import 'emergency_sharing_screen.dart';
 import 'news_screen.dart';
+
+import 'package:http/http.dart' as http;
 
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:android_intent_plus/android_intent.dart';
@@ -292,12 +297,217 @@ class HomeScreenState extends ConsumerState<HomeScreen>
     );
   }
 
+
+  Future<Map<String, dynamic>> _fetchAccuWeatherData() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+
+      // Check if cached weather data exists
+      final cachedWeather = prefs.getString('cachedWeatherData');
+      final lastUpdated = prefs.getInt('lastWeatherUpdate') ?? 0;
+
+      // Check if the cache is still valid (1 hour = 3600000 milliseconds)
+      final currentTime = DateTime.now().millisecondsSinceEpoch;
+      final isCacheValid = (currentTime - lastUpdated) < 3600000;
+
+      if (cachedWeather != null && isCacheValid) {
+        // Return cached weather data
+        return jsonDecode(cachedWeather) as Map<String, dynamic>;
+      }
+
+      // Fetch new weather data
+      final position = await _getCurrentLocation();
+      if (position == null) {
+        throw Exception('Unable to fetch location.');
+      }
+
+      final apiKey = dotenv.env['ACCUWEATHER_API_KEY'];
+      final latitude = position.latitude;
+      final longitude = position.longitude;
+
+      // Step 1: Get the location key from the AccuWeather API
+      final locationUrl =
+          'http://dataservice.accuweather.com/locations/v1/cities/geoposition/search?apikey=$apiKey&q=$latitude,$longitude';
+
+      final locationResponse = await http.get(Uri.parse(locationUrl));
+      if (locationResponse.statusCode != 200) {
+        throw Exception('Failed to fetch location data.');
+      }
+
+      final locationData = jsonDecode(locationResponse.body);
+      final locationKey = locationData['Key'];
+
+      // Step 2: Get the current conditions using the location key
+      final weatherUrl =
+          'http://dataservice.accuweather.com/currentconditions/v1/$locationKey?apikey=$apiKey';
+
+      final weatherResponse = await http.get(Uri.parse(weatherUrl));
+      if (weatherResponse.statusCode != 200) {
+        throw Exception('Failed to fetch weather data.');
+      }
+
+      final weatherData = jsonDecode(weatherResponse.body)[0];
+      final temp = weatherData['Temperature']['Metric']['Value'];
+      final description = weatherData['WeatherText'];
+      final icon = weatherData['WeatherIcon'];
+
+      final weatherResult = {
+        'temp': temp.toString(),
+        'description': description,
+        'icon': icon.toString().padLeft(2, '0'), // Ensure 2-digit icon format
+      };
+
+      // Cache the weather data
+      prefs.setString('cachedWeatherData', jsonEncode(weatherResult));
+      prefs.setInt('lastWeatherUpdate', currentTime);
+
+      return weatherResult;
+    } catch (error) {
+      debugPrint('Weather fetch error: $error');
+      throw error;
+    }
+  }
+
+  Widget _buildWeatherWidget() {
+    return FutureBuilder<Map<String, dynamic>>(
+      future: _fetchAccuWeatherData(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+            return _buildShimmerWeather();
+        } else if (snapshot.hasError || !snapshot.hasData) {
+          return Container(
+            padding: const EdgeInsets.all(16.0),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(16.0),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.grey.withOpacity(0.1),
+                  blurRadius: 8.0,
+                  offset: const Offset(0, 4),
+                ),
+              ],
+            ),
+            child: const Text(
+              'Unable to fetch weather data.',
+              style: TextStyle(fontSize: 14, color: Colors.black54),
+            ),
+          );
+        }
+
+        final weatherData = snapshot.data!;
+        final temp = weatherData['temp'];
+        final description = weatherData['description'];
+        final icon = weatherData['icon'];
+
+        return Container(
+          padding: const EdgeInsets.all(16.0),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(16.0),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.grey.withOpacity(0.1),
+                blurRadius: 8.0,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Current Weather',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    '$temp°C - $description',
+                    style: const TextStyle(
+                      fontSize: 14,
+                      color: Colors.black54,
+                    ),
+                  ),
+                ],
+              ),
+              Image.network(
+                'https://developer.accuweather.com/sites/default/files/$icon-s.png',
+                width: 50,
+                height: 50,
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildShimmerWeather() {
+    return Shimmer.fromColors(
+      baseColor: Colors.grey[300]!,
+      highlightColor: Colors.grey[100]!,
+      child: Container(
+        padding: const EdgeInsets.all(16.0),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16.0),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  width: 120,
+                  height: 16,
+                  color: Colors.white,
+                ),
+                const SizedBox(height: 8),
+                Container(
+                  width: 80,
+                  height: 16,
+                  color: Colors.white,
+                ),
+              ],
+            ),
+            Container(
+              width: 50,
+              height: 50,
+              color: Colors.white,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+
+
+
   Widget _buildHomeContent(UserState userState) {
+    final userState = ref.watch(userProvider);
     return SingleChildScrollView(
       padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 20.0),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+           Text(
+            'Hi, ${userState.name} !',
+            style: const TextStyle(
+              fontSize: 20.0,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 16),
+          _buildWeatherWidget(), // Add the weather widget here
+          const SizedBox(height: 20),
           const Text(
             'Get help fast',
             style: TextStyle(
@@ -307,16 +517,6 @@ class HomeScreenState extends ConsumerState<HomeScreen>
           ),
           const SizedBox(height: 16),
           _buildQuickAccess(),
-          // const SizedBox(height: 32),
-          // const Text(
-          //   'Be prepared',
-          //   style: TextStyle(
-          //     fontSize: 18.0,
-          //     fontWeight: FontWeight.bold,
-          //   ),
-          // ),
-          // const SizedBox(height: 12),
-          // _buildPreparednessTile(),
         ],
       ),
     );
