@@ -1,6 +1,5 @@
 import 'dart:async';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -10,8 +9,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../providers/user_provider.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:battery_plus/battery_plus.dart';
-import 'package:sensors_plus/sensors_plus.dart';
-import 'dart:math';
+
 
 import 'home_screen.dart';
 
@@ -408,18 +406,30 @@ class EmergencySharingScreenState
       message += "\nReason: $reason";
     }
 
-    // Send SMS to each contact
-    int successCount = 0;
+    // Prepare a list to hold futures
+    List<Future<void>> sendFutures = [];
     List<String> errors = [];
+
+    // Iterate over contacts and initiate SMS sending concurrently
     for (String contact in contacts) {
-      try {
-        final sanitizedContact = sanitizePhoneNumber(contact);
-        await twilioFlutter.sendSMS(toNumber: sanitizedContact, messageBody: message);
-        successCount++;
-      } catch (error) {
-        errors.add(contact);
-      }
+      final sanitizedContact = sanitizePhoneNumber(contact);
+      // Add the future to the list
+      sendFutures.add(
+        twilioFlutter.sendSMS(
+          toNumber: sanitizedContact,
+          messageBody: message,
+        ).catchError((error) {
+          // Handle individual errors
+          errors.add(contact);
+        }),
+      );
     }
+
+    // Wait for all SMS sending operations to complete
+    await Future.wait(sendFutures);
+
+    // Calculate the number of successful sends
+    int successCount = contacts.length - errors.length;
 
     // Show a SnackBar with the result
     if (context.mounted) {
@@ -432,6 +442,7 @@ class EmergencySharingScreenState
       );
     }
   }
+
 
 
   Map<String, dynamic> _sendBulkSMS(Map<String, dynamic> args) {
@@ -520,12 +531,17 @@ class EmergencySharingScreenState
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return WillPopScope(
+        onWillPop: () async {
+          // Prevent back navigation
+          return false;
+        },
+    child:  Scaffold(
       backgroundColor: const Color(0xFF121212), // Dark background
       appBar: AppBar(
         backgroundColor: const Color(0xFFFF2D3A),
         elevation: 0,
-        automaticallyImplyLeading: true,
+        automaticallyImplyLeading: false,
         title: Text(
           'Emergency Sharing',
           style: GoogleFonts.plusJakartaSans(
@@ -726,6 +742,6 @@ class EmergencySharingScreenState
           ],
         ),
       ),
-    );
+    ));
   }
 }

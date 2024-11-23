@@ -307,16 +307,16 @@ class HomeScreenState extends ConsumerState<HomeScreen>
           ),
           const SizedBox(height: 16),
           _buildQuickAccess(),
-          const SizedBox(height: 32),
-          const Text(
-            'Be prepared',
-            style: TextStyle(
-              fontSize: 18.0,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          const SizedBox(height: 12),
-          _buildPreparednessTile(),
+          // const SizedBox(height: 32),
+          // const Text(
+          //   'Be prepared',
+          //   style: TextStyle(
+          //     fontSize: 18.0,
+          //     fontWeight: FontWeight.bold,
+          //   ),
+          // ),
+          // const SizedBox(height: 12),
+          // _buildPreparednessTile(),
         ],
       ),
     );
