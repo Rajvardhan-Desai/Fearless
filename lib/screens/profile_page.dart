@@ -6,6 +6,7 @@ import '../widgets/user_avatar.dart';
 import 'change_password_screen.dart';
 import 'edit_profile_screen.dart';
 import 'emergency_contacts_screen.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 class ProfilePage extends StatefulWidget {
   final String userName;
@@ -120,9 +121,14 @@ class ProfilePageState extends State<ProfilePage> {
         ProfileOption(
           icon: Icons.group_outlined,
           text: 'Invite Friends',
-          onTap: () {
-            showSnackBar(
-                scaffoldMessenger, "Under development ! ", Colors.grey);
+          onTap: () async {
+            const url = 'https://github.com/Rajvardhan-Desai/Fearless/releases/tag/vBeta.x1';
+            if (await canLaunch(url)) {
+              await launch(url);
+            } else {
+              showSnackBar(
+                  scaffoldMessenger, "Could not open the link.", Colors.red);
+            }
           },
           subtitle: 'Invite your friends to join the app',
         ),
